@@ -40,6 +40,7 @@ permissions:
 
 env:
   CARGO_INCREMENTAL: 0
+  LIVI_UPDATE_REPO: ${{ github.repository }}
 
 jobs:
   plan:

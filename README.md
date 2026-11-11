@@ -407,3 +407,57 @@ Under section 7(b) of the GPL, [NOTICE](NOTICE) adds one term: works based on LI
 Copyright (C) 2025-2026 Lasse Heitgres
 
 You are free to use, study, share, and modify LIVI. If you distribute it or a modified version, you must pass on the same freedoms and make the corresponding source available under the GPL. It comes with NO WARRANTY, to the extent permitted by law.
+
+## Personal forks and on-device updates
+
+The build workflow embeds its own GitHub repository as the update source using
+`LIVI_UPDATE_REPO`. Fork builds therefore check that fork's releases rather than
+silently replacing personal changes with upstream binaries. For local builds, set
+`LIVI_UPDATE_REPO=owner/repository` when building. Runtime `UPDATE_REPO` overrides
+this default; `UPDATE_FEED` takes priority over both. Without a build or runtime
+override, the source remains `f-io/LIVI`.
+
+Use **Settings → Software Update** with a published release for the device's
+architecture. The nightly channel uses the fork's `nightly` tag. Upstream source
+changes still need review, merging, testing and a new fork release before they
+reach the device. This change does not automatically merge or publish upstream
+updates.
+
+Downloads are checked against the release asset's size and SHA-256 digest when
+those fields are supplied by the feed. Missing metadata remains supported for
+older/custom feeds; these checks are integrity checks, not independent release
+signatures. Linux installation requires running the AppImage and a writable
+directory with space for the download, staged replacement and backup. A raw
+unpacked binary installation cannot update itself through this path.
+
+Before replacement, Linux rejects downloads without a type-2 AppImage header,
+syncs the staged image and retains the previous executable as
+`<current AppImage>.old`. It then atomically renames the staged image and syncs
+the directory. The backup is for **manual recovery**, not automatic health
+rollback: stop LIVI and restore the `.old` file to the original AppImage path if
+a new release will not start. Each successful update replaces the previous backup.
+Each attempt uses unique staging files beside the AppImage, so files left by a
+power loss do not block a later update. Orphaned `.new-*` or `.old.new-*` files
+can be inspected and removed while LIVI is stopped to recover disk space. Test
+updates on the actual head unit while parked and keep a separate known-working
+image.
+
+## Head-unit system statistics
+
+Open **Settings → System → System statistics** for a read-only Linux hardware page,
+refreshed approximately every two seconds:
+
+- CPU usage across all cores and the highest current CPU policy frequency.
+- GPU usage/frequency when the kernel exposes Rockchip GPU devfreq readings.
+- RAM used/total, available storage/total and the filesystem holding LIVI's user data.
+- Named thermal-zone temperatures in Celsius and system uptime.
+
+Unavailable sensors say **Unavailable**, rather than showing a misleading zero.
+CPU usage needs two samples. GPU readings depend on the installed kernel and driver;
+no privileged debugfs access or Raspberry Pi-specific utility is required. Other
+platforms currently display unavailable readings. Statistics labels currently use
+English fallbacks.
+
+The Orange Pi 5 Plus uses a Rockchip RK3588, so Raspberry Pi-specific GPU commands
+are not used. Validate the actual board's sensors and packaged ARM64 build before
+using it in the vehicle. This page does not control fans, clocks or power limits.

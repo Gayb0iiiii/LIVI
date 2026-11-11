@@ -32,6 +32,16 @@ pub fn schema() -> Node {
                 CustomPage::About,
             ),
             Node::route(
+                "statistics",
+                Label::plain("System statistics"),
+                vec![Node::custom(
+                    Label::plain("System statistics"),
+                    "carName",
+                    CustomPage::SystemStatistics,
+                )],
+            )
+            .icon("systemStatistics"),
+            Node::route(
                 "logs",
                 Label::new("settings.logs", "Logs"),
                 vec![

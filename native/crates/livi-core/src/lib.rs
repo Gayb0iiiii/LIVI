@@ -56,6 +56,8 @@ mod services;
 mod spectrum;
 mod state_files;
 mod status_file;
+#[cfg(target_os = "linux")]
+mod system_statistics;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod system_volume;
 mod telemetry;
@@ -240,12 +242,20 @@ pub async fn run(
         resume_radio,
     );
 
+    #[cfg(target_os = "linux")]
+    let statistics_task = tokio::spawn(system_statistics::follow(
+        core.hub.clone(),
+        user_data.clone(),
+    ));
+
     tokio::select! {
         _ = server::serve(core.clone(), listener) => {}
         _ = stop => {}
         _ = quit.notified() => println!("[core] stopping"),
     }
     let _ = tokio::time::timeout(Duration::from_secs(2), gvfs_guard::stop()).await;
+    #[cfg(target_os = "linux")]
+    statistics_task.abort();
     goodbye(&core).await;
     services.stop().await;
     let _ = tokio::time::timeout(Duration::from_secs(2), wifi_ap::release_for_quit()).await;

@@ -8,13 +8,19 @@ use std::time::Duration;
 
 use livi_core_proto::state::{Release, Update, UpdatePhase};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use crate::server::Core;
 
-const NIGHTLY_TAG: &str = "nightly";
+#[cfg(not(target_os = "macos"))]
+#[path = "update_files.rs"]
+mod update_files;
+
+#[path = "update_feed.rs"]
+mod update_feed;
 const USER_AGENT: &str = "LIVI-updater";
 const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 const PACKAGE: &str = if cfg!(target_os = "macos") {
@@ -42,21 +48,11 @@ pub enum UpdateAsk {
 }
 
 fn feed_url(nightly: bool) -> String {
-    if let Ok(feed) = std::env::var("UPDATE_FEED")
-        && !feed.is_empty()
-    {
-        return feed;
-    }
-    let repo = std::env::var("UPDATE_REPO").ok().filter(|r| !r.is_empty());
-    let base = format!(
-        "https://api.github.com/repos/{}/releases",
-        repo.as_deref().unwrap_or("f-io/LIVI")
-    );
-    if nightly {
-        format!("{base}/tags/{NIGHTLY_TAG}")
-    } else {
-        format!("{base}/latest")
-    }
+    update_feed::resolve_feed(
+        nightly,
+        std::env::var("UPDATE_FEED").ok().as_deref(),
+        std::env::var("UPDATE_REPO").ok().as_deref(),
+    )
 }
 
 fn run_number(title: &str) -> String {
@@ -114,7 +110,16 @@ fn release(feed: &Value) -> Release {
         .cloned()
         .unwrap_or_default();
     let url = pick_asset(&assets, std::env::consts::ARCH, PACKAGE);
+    let asset = assets.iter().find(|a| {
+        url.as_deref()
+            .is_some_and(|url| a.get("browser_download_url").and_then(Value::as_str) == Some(url))
+    });
     Release {
+        size: asset.and_then(|a| a.get("size")).and_then(Value::as_u64),
+        digest: asset
+            .and_then(|a| a.get("digest"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         version,
         commit: text("target_commitish"),
         run: run_number(&text("name")),
@@ -143,18 +148,11 @@ async fn install(downloaded: &Path) -> Result<PathBuf, String> {
     let current = std::env::var_os("APPIMAGE")
         .map(PathBuf::from)
         .ok_or("LIVI does not run from an AppImage")?;
-    let mut staged = current.clone().into_os_string();
-    staged.push(".new");
-    let staged = PathBuf::from(staged);
-    tokio::fs::copy(downloaded, &staged)
+    let target = current.clone();
+    let downloaded = downloaded.to_path_buf();
+    tokio::task::spawn_blocking(move || update_files::replace_appimage(&downloaded, &target))
         .await
-        .map_err(|e| e.to_string())?;
-    let mode = std::os::unix::fs::PermissionsExt::from_mode(0o755);
-    tokio::fs::set_permissions(&staged, mode)
-        .await
-        .map_err(|e| e.to_string())?;
-    tokio::fs::rename(&staged, &current)
-        .await
+        .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
     Ok(current)
 }
@@ -258,6 +256,8 @@ async fn download(
     url: String,
     file: PathBuf,
     progress: mpsc::UnboundedSender<(f64, f64)>,
+    size: Option<u64>,
+    digest: Option<String>,
 ) -> Result<(), String> {
     let mut res = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if !res.status().is_success() {
@@ -268,16 +268,38 @@ async fn download(
         .await
         .map_err(|e| e.to_string())?;
     let mut received = 0.0;
+    let mut bytes_received = 0_u64;
+    let mut hash = Sha256::new();
     let mut told = Instant::now();
     while let Some(chunk) = res.chunk().await.map_err(|e| e.to_string())? {
         out.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        bytes_received += chunk.len() as u64;
+        if size.is_some_and(|size| bytes_received > size) {
+            return Err("Download exceeds release asset size".into());
+        }
+        hash.update(&chunk);
         received += chunk.len() as f64;
         if told.elapsed() >= PROGRESS_EVERY {
             told = Instant::now();
             let _ = progress.send((received, total));
         }
     }
+    if size.is_some_and(|size| bytes_received != size) {
+        return Err("Download size does not match release asset".into());
+    }
+    if let Some(expected) = digest {
+        let hex: String = hash
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let actual = format!("sha256:{hex}");
+        if !actual.eq_ignore_ascii_case(&expected) {
+            return Err("Download SHA-256 digest does not match release asset".into());
+        }
+    }
     out.flush().await.map_err(|e| e.to_string())?;
+    out.sync_all().await.map_err(|e| e.to_string())?;
     let _ = progress.send((received, total));
     Ok(())
 }
@@ -351,9 +373,11 @@ pub async fn run(
                     let (stop, stopped) = oneshot::channel::<()>();
                     let (client, progress, done, path) =
                         (client.clone(), progress_tx.clone(), done_tx.clone(), target.clone());
+                    let size = state.latest.as_ref().and_then(|r| r.size);
+                    let digest = state.latest.as_ref().and_then(|r| r.digest.clone());
                     tokio::spawn(async move {
                         let result = tokio::select! {
-                            r = download(client, url, path, progress) => r,
+                            r = download(client, url, path, progress, size, digest) => r,
                             _ = stopped => return,
                         };
                         let _ = done.send(result);
@@ -437,6 +461,58 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn download_checks_release_digest_and_size() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (size, digest, accepted) in [
+            (Some(4), None, false),
+            (Some(2), None, false),
+            (Some(3), Some(format!("sha256:{}", "0".repeat(64))), false),
+            (Some(3), Some("md5:unsupported".to_string()), false),
+            (
+                Some(3),
+                Some(
+                    "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                        .to_string(),
+                ),
+                true,
+            ),
+            (None, None, true),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                let _ = socket.read(&mut request).await.unwrap();
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc",
+                    )
+                    .await
+                    .unwrap();
+            });
+            let path = std::env::temp_dir().join(format!(
+                "livi-download-test-{}-{}",
+                std::process::id(),
+                address.port()
+            ));
+            let (tx, _) = mpsc::unbounded_channel();
+            let result = download(
+                reqwest::Client::new(),
+                format!("http://{address}/asset"),
+                path.clone(),
+                tx,
+                size,
+                digest,
+            )
+            .await;
+            server.await.unwrap();
+            let _ = tokio::fs::remove_file(path).await;
+            assert_eq!(result.is_ok(), accepted, "{result:?}");
+        }
+    }
+
     #[test]
     fn the_feed_gives_version_commit_run_and_this_machines_build() {
         let feed = json!({
@@ -444,13 +520,15 @@ mod tests {
             "name": "LIVI nightly #482",
             "target_commitish": "abc1234",
             "assets": [
-                { "name": "LIVI-9.1.0-arm64.AppImage", "browser_download_url": "https://x/arm" },
-                { "name": "LIVI-9.1.0-x86_64.AppImage", "browser_download_url": "https://x/x64" },
-                { "name": "LIVI-9.1.0-arm64.dmg", "browser_download_url": "https://x/dmg" },
-                { "name": "LIVI-9.1.0-android-arm64.apk", "browser_download_url": "https://x/apk" }
+                { "name": "LIVI-9.1.0-arm64.AppImage", "browser_download_url": "https://x/arm", "size": 3, "digest": "sha256:test" },
+                { "name": "LIVI-9.1.0-x86_64.AppImage", "browser_download_url": "https://x/x64", "size": 3, "digest": "sha256:test" },
+                { "name": "LIVI-9.1.0-arm64.dmg", "browser_download_url": "https://x/dmg", "size": 3, "digest": "sha256:test" },
+                { "name": "LIVI-9.1.0-android-arm64.apk", "browser_download_url": "https://x/apk", "size": 3, "digest": "sha256:test" }
             ]
         });
         let r = release(&feed);
+        assert_eq!(r.size, Some(3));
+        assert_eq!(r.digest.as_deref(), Some("sha256:test"));
         assert_eq!(
             (r.version.as_str(), r.commit.as_str(), r.run.as_str()),
             ("9.1.0", "abc1234", "482")

@@ -41,6 +41,7 @@ pub fn rows(page: CustomPage, state: &Value, t: &Strings, facts: &Facts) -> Opti
         CustomPage::FmStations => radio::fm_stations(&radio::fm(state), t),
         CustomPage::About => system::about(t, facts),
         CustomPage::SoftwareUpdate => system::update(state, t, facts),
+        CustomPage::SystemStatistics => system::statistics(state, t),
         CustomPage::Restart | CustomPage::PowerOff => Vec::new(),
         CustomPage::WifiLinkInfo => system::link_speed(state, t),
         CustomPage::CarReadings => car::readings(state, t),
