@@ -79,6 +79,110 @@ pub fn link_speed(state: &Value, t: &Strings) -> Vec<Row> {
     ]
 }
 
+/// Optional kernel readings stay unavailable, never an invented zero.
+pub fn statistics(state: &Value, t: &Strings) -> Vec<Row> {
+    let stats = &state["system"]["statistics"];
+    let unavailable = || t.t("systemStatistics.unavailable", "Unavailable");
+    let number = |key: &str, max: f64| {
+        stats[key]
+            .as_f64()
+            .filter(|n| n.is_finite() && *n >= 0.0 && *n <= max)
+    };
+    let percentage =
+        |key: &str| number(key, 100.0).map_or_else(unavailable, |n| format!("{n:.1} %"));
+    let frequency =
+        |key: &str| number(key, f64::MAX).map_or_else(unavailable, |n| format!("{n:.0} MHz"));
+    let capacity = |total_key: &str, available_key: &str, memory: bool| {
+        let total = stats[total_key].as_u64().filter(|n| *n > 0);
+        let available = stats[available_key].as_u64();
+        match (total, available) {
+            (Some(total), Some(available)) if available <= total => {
+                let gib = 1024.0 * 1024.0 * 1024.0;
+                if memory {
+                    t.with(
+                        "systemStatistics.memoryUsed",
+                        "{{used}} / {{total}} GiB used",
+                        &[
+                            ("used", &format!("{:.1}", (total - available) as f64 / gib)),
+                            ("total", &format!("{:.1}", total as f64 / gib)),
+                        ],
+                    )
+                } else {
+                    t.with(
+                        "systemStatistics.storageAvailable",
+                        "{{available}} / {{total}} GiB available",
+                        &[
+                            ("available", &format!("{:.1}", available as f64 / gib)),
+                            ("total", &format!("{:.1}", total as f64 / gib)),
+                        ],
+                    )
+                }
+            }
+            _ => unavailable(),
+        }
+    };
+    let uptime = stats["uptimeSeconds"]
+        .as_f64()
+        .filter(|n| n.is_finite() && *n >= 0.0 && *n < u64::MAX as f64)
+        .map(|n| n as u64)
+        .map_or_else(unavailable, |n| {
+            format!("{}d {}h {}m", n / 86400, n / 3600 % 24, n / 60 % 60)
+        });
+    let mut rows = vec![
+        mono(
+            t.t("systemStatistics.cpuUsage", "CPU usage"),
+            percentage("cpuUsagePercent"),
+        ),
+        mono(
+            t.t("systemStatistics.cpuFrequency", "CPU frequency"),
+            frequency("cpuFrequencyMhz"),
+        ),
+        mono(
+            t.t("systemStatistics.gpuUsage", "GPU usage"),
+            percentage("gpuUsagePercent"),
+        ),
+        mono(
+            t.t("systemStatistics.gpuFrequency", "GPU frequency"),
+            frequency("gpuFrequencyMhz"),
+        ),
+        mono(
+            t.t("systemStatistics.memory", "Memory"),
+            capacity("memoryTotalBytes", "memoryAvailableBytes", true),
+        ),
+        mono(
+            t.t("systemStatistics.storage", "Storage"),
+            capacity("storageTotalBytes", "storageAvailableBytes", false),
+        ),
+        mono(
+            t.t("systemStatistics.storageLocation", "Storage location"),
+            stats["storagePath"]
+                .as_str()
+                .filter(|p| !p.is_empty())
+                .map_or_else(unavailable, str::to_owned),
+        ),
+        mono(t.t("systemStatistics.uptime", "Uptime"), uptime),
+    ];
+    let sensors: Vec<Row> = stats["temperatures"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|sensor| {
+            let name = sensor["name"].as_str()?.trim();
+            let celsius = sensor["celsius"].as_f64().filter(|n| n.is_finite())?;
+            (!name.is_empty()).then(|| mono(name.to_string(), format!("{celsius:.1} °C")))
+        })
+        .collect();
+    if sensors.is_empty() {
+        rows.push(mono(
+            t.t("systemStatistics.temperatures", "Temperatures"),
+            unavailable(),
+        ));
+    } else {
+        rows.extend(sensors);
+    }
+    rows
+}
+
 fn semver(v: &str) -> Option<[u64; 3]> {
     let mut it = v.trim().split('.').map(|p| p.parse::<u64>().ok());
     let out = [it.next()??, it.next()??, it.next()??];

@@ -188,6 +188,10 @@ pub struct Release {
     pub commit: String,
     pub run: String,
     pub url: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -255,6 +259,8 @@ pub enum DeviceStatus {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct System {
+    #[serde(default)]
+    pub statistics: SystemStatistics,
     pub wifi_interfaces: Vec<String>,
     pub bt_adapters: Vec<String>,
     pub interface_models: BTreeMap<String, String>,
@@ -269,6 +275,30 @@ pub struct System {
     pub audio_sources: Vec<AudioDevice>,
     pub start_page: String,
     pub fonts: Vec<String>,
+}
+
+/// Host measurements. Missing or unsupported readings stay null, never zero.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SystemStatistics {
+    pub cpu_usage_percent: Option<f64>,
+    pub cpu_frequency_mhz: Option<f64>,
+    pub gpu_usage_percent: Option<f64>,
+    pub gpu_frequency_mhz: Option<f64>,
+    pub memory_total_bytes: Option<u64>,
+    pub memory_available_bytes: Option<u64>,
+    pub storage_total_bytes: Option<u64>,
+    pub storage_available_bytes: Option<u64>,
+    pub storage_path: Option<String>,
+    pub uptime_seconds: Option<f64>,
+    pub temperatures: Vec<SystemTemperature>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemTemperature {
+    pub name: String,
+    pub celsius: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -470,6 +500,17 @@ impl<T> PerScreen<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn statistics_defaults_preserve_older_system_messages() {
+        let mut value = serde_json::to_value(System::default()).unwrap();
+        value.as_object_mut().unwrap().remove("statistics");
+        let system: System = serde_json::from_value(value).unwrap();
+        let encoded = serde_json::to_value(system).unwrap();
+        assert!(encoded["statistics"].is_object());
+        assert_eq!(encoded["statistics"]["cpuUsagePercent"], Value::Null);
+        assert_eq!(encoded["statistics"]["temperatures"], serde_json::json!([]));
+    }
 
     #[test]
     fn every_section_reads_back_what_the_core_wrote() {

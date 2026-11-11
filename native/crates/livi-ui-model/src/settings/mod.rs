@@ -136,7 +136,7 @@ mod tests {
             all.iter()
                 .filter(|n| matches!(n.kind, Kind::Custom(_)))
                 .count()
-                == 20
+                == 21
         );
     }
 }

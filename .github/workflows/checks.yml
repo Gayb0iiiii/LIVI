@@ -1,6 +1,7 @@
 name: checks
 
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
   pull_request:
@@ -74,7 +75,7 @@ jobs:
 
   macos:
     name: macOS (clippy, tests)
-    if: ${{ github.actor != 'github-actions' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
+    if: ${{ github.actor != 'github-actions' && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
     runs-on: macos-latest
     timeout-minutes: 40
     env:

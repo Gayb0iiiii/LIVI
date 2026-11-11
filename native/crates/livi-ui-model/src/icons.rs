@@ -117,6 +117,7 @@ const SETTINGS: &[(&str, &str)] = &[
     ("uiIcon", "ImageOutlined"),
     ("about", "InfoOutlined"),
     ("softwareUpdate", "SystemUpdateAltOutlined"),
+    ("systemStatistics", "MemoryOutlined"),
     ("logs", "ArticleOutlined"),
     ("debugLogging", "BugReportOutlined"),
     ("restart", "RestartAltOutlined"),

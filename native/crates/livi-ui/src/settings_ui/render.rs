@@ -144,6 +144,7 @@ pub(super) fn custom_name(page: CustomPage) -> &'static str {
         CustomPage::PowerOff => "Power off",
         CustomPage::Restart => "Restart",
         CustomPage::SoftwareUpdate => "Software update",
+        CustomPage::SystemStatistics => "System statistics",
         CustomPage::Touch(_) => "Touch",
         CustomPage::WifiLinkInfo => "Wi-Fi link",
     }
