@@ -6,6 +6,7 @@ serialization, oversized frames, provider failures and accidental real-device
 enablement. No stock binary, certificate, private key or signature is used.
 """
 import concurrent.futures
+import json
 import os
 from pathlib import Path
 import select
@@ -198,12 +199,13 @@ class InterposerTests(unittest.TestCase):
         self.assertEqual(app.request(b"\x03"), (0, b"\x03"))
 
     def test_default_build_never_exposes_provider(self):
-        app = self.start(library="observe.so")
+        app = self.start(library="observe.so", extra={"AX520_DEVICE_BRIDGE": "1"})
         app.command("select")
         self.assert_closed(app)
 
     def test_test_build_cannot_enable_a_provider_without_synthetic_marker(self):
-        app = self.start(extra={"LD_LIBRARY_PATH": str(self.artifacts / "no-marker")})
+        app = self.start(extra={"LD_LIBRARY_PATH": str(self.artifacts / "no-marker"),
+                                "AX520_DEVICE_BRIDGE": "1"})
         self.assertEqual(app.command("select"), "selected 0")
         self.assert_closed(app)
 
@@ -367,6 +369,63 @@ class InterposerTests(unittest.TestCase):
                 app = self.start(extra={"AX520_AUTH_PORT": port})
                 app.command("select")
                 self.assert_closed(app)
+
+    def test_provider_path_gate_requires_exact_path_and_one_dso(self):
+        # Exercise real dladdr ownership with synthetic DSOs. Removing either
+        # the exact-path or common-owner check must change these results.
+        source = self.artifacts / "provider-gate.c"
+        binary = self.artifacts / "provider-gate"
+        source.write_text("#define AX520_SYNTHETIC_TEST\n#include "
+                          + json.dumps(str(SOURCE / "interposer.c")) + r'''
+#include <stdio.h>
+int main(int argc, char **argv) {
+    if (argc != 3) return 2;
+    void *vendor = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+    void *other = dlopen(argv[2], RTLD_NOW | RTLD_LOCAL);
+    if (!vendor || !other) return 3;
+    stock_setter = (setter_fn)dlsym(vendor, "SetiAPI2CAddr");
+    stock_sign = (sign_fn)dlsym(vendor, "AuthDeviceCreateSignature");
+    stock_cert = (cert_fn)dlsym(vendor, "AuthDeviceCopyCertificate");
+    int valid = provider_at_path(argv[1]);
+    int wrong_path = provider_at_path("/not/the/expected/provider.so");
+    stock_cert = (cert_fn)dlsym(other, "ax520_synthetic_test_provider");
+    int mixed = provider_at_path(argv[1]);
+    stock_cert = NULL;
+    int missing = provider_at_path(argv[1]);
+    int counts[4] = {-1, -1, -1, -1};
+    void (*get_counts)(int *) = (void (*)(int *))dlsym(vendor, "MockCounts");
+    if (!get_counts) return 4;
+    get_counts(counts);
+    printf("%d %d %d %d\n%d %d %d %d\n", valid, wrong_path, mixed, missing,
+           counts[0], counts[1], counts[2], counts[3]);
+    return 0;
+}
+''')
+        compiled = subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                                   "-pthread", str(source), "-ldl", "-o", str(binary)],
+                                  capture_output=True, text=True)
+        self.assertEqual(compiled.returncode, 0, compiled.stderr)
+        checked = subprocess.run([str(binary), str(self.artifacts / "libmock.so"),
+                                  str(self.artifacts / "unrelated-marker.so")],
+                                 capture_output=True, text=True, timeout=3)
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        self.assertEqual(checked.stdout, "1 0 0 0\n0 0 0 0\n")
+
+    def test_real_mode_rejects_unsupported_native_target(self):
+        compiled = subprocess.run(["cc", "-DAX520_ENABLE_DEVICE_BRIDGE", "-shared", "-fPIC",
+                                   "-pthread", str(SOURCE / "interposer.c"), "-ldl", "-o",
+                                   str(self.artifacts / "invalid-real.so")],
+                                  capture_output=True, text=True)
+        self.assertNotEqual(compiled.returncode, 0)
+        self.assertIn("requires ARM32 hard-float uClibc-ng 1.0.22", compiled.stderr)
+
+    def test_real_and_synthetic_build_modes_cannot_be_combined(self):
+        compiled = subprocess.run(["cc", "-DAX520_ENABLE_DEVICE_BRIDGE", "-DAX520_SYNTHETIC_TEST",
+                                   "-shared", "-fPIC", "-pthread", str(SOURCE / "interposer.c"),
+                                   "-ldl", "-o", str(self.artifacts / "invalid-mixed.so")],
+                                  capture_output=True, text=True)
+        self.assertNotEqual(compiled.returncode, 0)
+        self.assertIn("mutually exclusive", compiled.stderr)
 
 
 if __name__ == "__main__":

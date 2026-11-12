@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
  * Review prototype: default build observes/serializes, but opens NO listener.
- * Network code is available only with the synthetic test provider, never stock.
+ * Stock RPC requires a separate target-specific build and explicit runtime opt-in.
  * No vendor code, authentication identity, or key material belongs in this file.
  */
 #define _GNU_SOURCE
@@ -19,8 +19,15 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(AX520_ENABLE_DEVICE_BRIDGE) && defined(AX520_SYNTHETIC_TEST)
+#error "Real-stock and synthetic build modes are mutually exclusive"
+#endif
 #ifdef AX520_ENABLE_DEVICE_BRIDGE
-#error "Device bridge blocked: target ABI, lifecycle and protocol metadata need review"
+#if !defined(__arm__) || !defined(__ARM_PCS_VFP) || UINTPTR_MAX != UINT32_MAX || \
+    !defined(__UCLIBC__) || !defined(__UCLIBC_HAS_THREADS_NATIVE__) || \
+    __UCLIBC_MAJOR__ != 1 || __UCLIBC_MINOR__ != 0 || __UCLIBC_SUBLEVEL__ != 22
+#error "Real-stock mode requires ARM32 hard-float uClibc-ng 1.0.22 with NPTL"
+#endif
 #endif
 
 typedef int (*setter_fn)(void *, int, const char *);
@@ -36,7 +43,7 @@ static pid_t constructor_pid;
 static int atfork_ok, fork_child, selected;
 static int observer_reader = -1, observer_writer = -1;
 
-#ifdef AX520_SYNTHETIC_TEST
+#if defined(AX520_SYNTHETIC_TEST) || defined(AX520_ENABLE_DEVICE_BRIDGE)
 static int listener_fd = -1, client_fd = -1, server_started;
 static pthread_mutex_t lifecycle_lock = PTHREAD_MUTEX_INITIALIZER;
 static void start_server_locked(void);
@@ -102,12 +109,12 @@ static void observer_event(unsigned char flags) {
 
 static void fork_prepare(void) {
     pthread_mutex_lock(&provider_lock);
-#ifdef AX520_SYNTHETIC_TEST
+#if defined(AX520_SYNTHETIC_TEST) || defined(AX520_ENABLE_DEVICE_BRIDGE)
     pthread_mutex_lock(&lifecycle_lock);
 #endif
 }
 static void fork_parent(void) {
-#ifdef AX520_SYNTHETIC_TEST
+#if defined(AX520_SYNTHETIC_TEST) || defined(AX520_ENABLE_DEVICE_BRIDGE)
     pthread_mutex_unlock(&lifecycle_lock);
 #endif
     pthread_mutex_unlock(&provider_lock);
@@ -116,7 +123,7 @@ static void fork_reset(void) {
     /* Only this thread survives fork. Parent sockets must never be shutdown. */
     selected = 0;
     fork_child = 1;
-#ifdef AX520_SYNTHETIC_TEST
+#if defined(AX520_SYNTHETIC_TEST) || defined(AX520_ENABLE_DEVICE_BRIDGE)
     if (listener_fd >= 0) close(listener_fd);
     if (client_fd >= 0) close(client_fd);
     listener_fd = client_fd = -1;
@@ -142,13 +149,13 @@ int SetiAPI2CAddr(void *context, int address, const char *path) {
     if (stock_setter) result = stock_setter(context, address, path);
     /* Observe the original call AFTER forwarding it, with no altered arguments.
      * A zero return alone is insufficient: exact observed selector and child
-     * lifecycle are also required. The real device gate remains unresolved. */
+     * lifecycle are also required. Listener build/provider gates remain separate. */
     if (result == 0 && address == 0x20 && path && !strcmp(path, "ly_iap") &&
         atfork_ok && fork_child && getpid() != constructor_pid) {
         selected = 1;
         start_server_locked();
     }
-#ifdef AX520_SYNTHETIC_TEST
+#if defined(AX520_SYNTHETIC_TEST) || defined(AX520_ENABLE_DEVICE_BRIDGE)
     /* Revocation stops an existing response/session as well as future calls.
      * This is intentionally shutdown here, but close-only in the fork child. */
     pthread_mutex_lock(&lifecycle_lock);
@@ -189,19 +196,35 @@ int AuthDeviceCopyCertificate(unsigned char **output, size_t *output_length) {
     return result;
 }
 
+#if defined(AX520_SYNTHETIC_TEST) || defined(AX520_ENABLE_DEVICE_BRIDGE)
+/* A pathname is not a fingerprint. Before a real launch, the caller MUST
+ * independently verify /mnt/customer/app/libiap_new.so SHA-256 is
+ * 19326c5b73c61fd5a604d114ad49035a3730c7d12bfacaef165f7048e8f42e53.
+ * This check only binds the three resolved functions to the expected DSO. */
+static int provider_at_path(const char *path) {
+    Dl_info setter, signer, certificate;
+    return path && stock_setter && stock_sign && stock_cert &&
+        dladdr((void *)stock_setter, &setter) && dladdr((void *)stock_sign, &signer) &&
+        dladdr((void *)stock_cert, &certificate) && setter.dli_fname &&
+        !strcmp(setter.dli_fname, path) && setter.dli_fbase == signer.dli_fbase &&
+        setter.dli_fbase == certificate.dli_fbase;
+}
+
+static int provider_allowed(void) {
 #ifdef AX520_SYNTHETIC_TEST
-/* This symbol exists only in tests/mock_vendor.c. A test build accidentally
- * loaded beside the stock library still cannot open a signer listener. No env
- * variable or user-provided protocol number can override this gate. */
-static int synthetic_provider(void) {
+    /* A test build cannot enable stock, even with the real-mode environment.
+     * The explicit marker and all provider exports must belong to one DSO. */
     typedef int (*marker_fn)(void);
     marker_fn marker = (marker_fn)dlsym(RTLD_NEXT, "ax520_synthetic_test_provider");
-    Dl_info owner, setter, signer, certificate;
+    Dl_info owner, setter;
     return marker && dladdr((void *)marker, &owner) &&
-        dladdr((void *)stock_setter, &setter) && dladdr((void *)stock_sign, &signer) &&
-        dladdr((void *)stock_cert, &certificate) &&
-        owner.dli_fbase == setter.dli_fbase && owner.dli_fbase == signer.dli_fbase &&
-        owner.dli_fbase == certificate.dli_fbase && marker() == 0x41583532;
+        dladdr((void *)stock_setter, &setter) && owner.dli_fbase == setter.dli_fbase &&
+        provider_at_path(owner.dli_fname) && marker() == 0x41583532;
+#else
+    const char *enabled = getenv("AX520_DEVICE_BRIDGE");
+    return enabled && !strcmp(enabled, "1") &&
+        provider_at_path("/mnt/customer/app/libiap_new.so");
+#endif
 }
 
 static int configured_port(void) {
@@ -305,7 +328,9 @@ static void serve(int fd) {
         }
         if (selected && stock_sign && stock_cert) {
             if (op == 3) {
-                /* Synthetic fixture metadata only; real major is a blocked gate. */
+                /* For the reviewed stock profile this is a P-256 compatibility
+                 * classification, not a value read from a stock version getter.
+                 * The synthetic fixture implements the same wire contract. */
                 response[0] = 3;
                 response_length = 1;
                 status = 0;
@@ -369,7 +394,7 @@ static void *server_main(void *unused) {
 }
 
 static void start_server_locked(void) {
-    if (!stock_sign || !stock_cert || !synthetic_provider()) return;
+    if (!stock_sign || !stock_cert || !provider_allowed()) return;
     int port = configured_port();
     if (port < 0) return;
     pthread_mutex_lock(&lifecycle_lock);
