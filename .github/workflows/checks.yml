@@ -57,6 +57,9 @@ jobs:
               libudev-dev libinput-dev libseat-dev libgbm-dev
           sudo rm -rf /var/lib/apt/lists/*
 
+      - name: Check inherited CLA scope
+        run: python3 scripts/ci/test_cla_scope.py
+
       - name: Check Rust formatting
         working-directory: native
         run: cargo fmt --all --check
