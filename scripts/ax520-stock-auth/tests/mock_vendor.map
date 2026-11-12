@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+libiap.so {
+    global: SetiAPI2CAddr; AuthDeviceCreateSignature; AuthDeviceCopyCertificate;
+};
+mock_fixture {
+    global: MockFault; MockCounts; ax520_synthetic_test_provider;
+    local: *;
+};

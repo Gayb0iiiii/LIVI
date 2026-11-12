@@ -1,0 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+libiap.so {
+    global: SetiAPI2CAddr; AuthDeviceCreateSignature; AuthDeviceCopyCertificate;
+    local: *;
+};

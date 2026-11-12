@@ -124,7 +124,7 @@ Safe prerequisites to read first are process presence, node existence, the expec
 
 ## ABI and startup safety follow-up
 
-This section remains static analysis. An independent stock-library wrapper has **not** been implemented or executed.
+The ABI analysis below is static. A [prototype observer/interposer](../scripts/ax520-stock-auth/README.md) now has synthetic runtime validation, described below, but has **not** been loaded into the real stock application.
 
 ### Constructors and per-process state
 
@@ -151,4 +151,19 @@ The binary declares ARMv7/Cortex-A7, Thumb-2/NEON and hard-float EABI, and depen
 - The software helper uses global scratch state. Serialize any future requests and never race a change of provider against an active signature operation. Memory allocation and success return are not evidence that the phone accepted the result.
 - No exported protocol-major query was found. Public curve constants at `0x13198` (field prime) and `0x13178` (subgroup order) match NIST P-256 and are referenced by the reviewed arithmetic. Output comprises two 32-byte big-endian components. This supports a P-256-compatible classification; it is not an independent verification of every signing operation. Advertising major 3 in a future LIVI adapter would be an inferred compatibility classification, not a measured stock register or an explicit stock advertisement.
 - Matching live library hashes, stock-selected mode/path, and the observed iAP2 phone acceptance are now established above. Remaining integration requirements include loader/ABI compatibility on this unit, preserving normal selection and lifecycle, serializing stock and external operations, and verifying the subsequent CarPlay exchange with the phone.
-- No credential export, additional stock binary launch, mode forcing, duplicate `lylinkapp`, authentication service, or device mutation was performed for this report.
+- No credential export, additional stock binary launch, mode forcing, duplicate `lylinkapp`, or authentication service was performed for this report. The later synthetic test below used temporary files only.
+
+## Prototype validation on the same dongle
+
+The default observer build and two synthetic fixture binaries were temporarily copied into a unique directory under `/tmp`, after verifying that the live libc and loader matched the runtime used for local ARM emulation:
+
+| Runtime file          | SHA-256                                                            |
+| --------------------- | ------------------------------------------------------------------ |
+| `/lib/libc.so.0`      | `41954a9a9fd14d262eada61caf8de98749385e2dde1ed1fac488437a45efb69a` |
+| `/lib/ld-uClibc.so.0` | `39d3f7d7b34448c8c7026b6b3fe46218366700fc0c768c285796d6fcb2acd8b6` |
+
+All three transferred file hashes were checked before execution. The observer artifact had SHA-256 `f4ab562368039395609002f081c43eb433233dd0daa55cfcc6bfcb999e2bfd04`, built from interposer source SHA-256 `2eca799e42bfbb3738b9967043e22fae01593d8e1a4a1a3e50beac413244bc3d`.
+
+Both baseline and interposed synthetic runs exited zero after a fork and four worker threads. Both completed 96 mock signature calls and zero certificate calls; peak concurrent provider calls fell from 4 to 1 with interposition. Original selector return values `0`, `23`, and `-71` passed through unchanged. This used the synthetic provider, not the stock authentication library, and the default observer opened no listener.
+
+Stock supervisor/worker PIDs remained 986/1322 before and after the test. The three temporary binaries and their directory were removed and removal verified. No stock process, startup setting, firmware or partition was changed. This verifies the exercised loader, symbol, fork and mutex behavior on this device; it does not establish real stock-process interposition, provider lifecycle safety, or external CarPlay authentication.
