@@ -95,7 +95,8 @@ static void observer_event(unsigned char flags) {
     /* One nonblocking write, below PIPE_BUF. Full pipes drop the event. Keeping
      * our own read end avoids SIGPIPE even after the collector disappears.
      * The caller must not change the dedicated pipe's O_NONBLOCK status. */
-    (void)write(observer_writer, event, sizeof event);
+    ssize_t written = write(observer_writer, event, sizeof event);
+    (void)written;
     errno = saved_errno;
 }
 

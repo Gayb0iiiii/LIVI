@@ -22,7 +22,7 @@ SOURCE = HERE.parent
 
 
 def build(command):
-    subprocess.run(command, check=True, capture_output=True, text=True)
+    subprocess.run(command, check=True)
 
 
 def exact(sock, size):
@@ -136,7 +136,7 @@ class InterposerTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temporary = tempfile.TemporaryDirectory(prefix="ax520-mock-")
         cls.artifacts = Path(cls.temporary.name)
-        common = ["cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror", "-O1", "-g", "-pthread"]
+        common = ["cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-D_FORTIFY_SOURCE=2", "-Wall", "-Wextra", "-Werror", "-O1", "-g", "-pthread"]
         build(common + ["-shared", "-fPIC", str(HERE / "mock_vendor.c"),
               "-Wl,--version-script=" + str(HERE / "mock_vendor.map"),
               "-o", str(cls.artifacts / "libmock.so")])
