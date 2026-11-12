@@ -55,6 +55,16 @@ impl NcmCoprocessor {
             .read_exact(&mut hdr)
             .map_err(|e| MfiError::Io(format!("mfid read: {e}")))?;
         let len = ((hdr[1] as usize) << 8) | hdr[2] as usize;
+        // Protocol discovery is used during helper startup. Reject malformed
+        // lengths before waiting for a body supplied by an external provider.
+        if req == [OP_PROTOCOL_MAJOR] {
+            let expected = usize::from(hdr[0] == STATUS_OK);
+            if len != expected {
+                return Err(MfiError::Io(format!(
+                    "mfid protocol response must contain {expected} bytes, got {len}"
+                )));
+            }
+        }
         let mut data = vec![0u8; len];
         if len > 0 {
             stream
@@ -116,6 +126,38 @@ impl AuthCoprocessor for NcmCoprocessor {
 mod tests {
     use super::*;
     use std::net::TcpListener;
+
+    #[test]
+    fn protocol_discovery_rejects_a_large_body_without_reading_it() {
+        reject_protocol_body(STATUS_OK, 1);
+        reject_protocol_body(crate::server::STATUS_ERR, 0);
+    }
+
+    fn reject_protocol_body(status: u8, expected: usize) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let (release, hold) = std::sync::mpsc::channel::<()>();
+        let peer = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut request = [0];
+            socket.read_exact(&mut request).unwrap();
+            assert_eq!(request, [OP_PROTOCOL_MAJOR]);
+            socket.write_all(&[status, 0xff, 0xff]).unwrap();
+            // Keep the socket open with no body: the client must reject the
+            // length, not wait for a read timeout or accept a leading byte.
+            let _ = hold.recv();
+        });
+        let mut chip = NcmCoprocessor::new(&addr);
+        let error = chip.try_request(&[OP_PROTOCOL_MAJOR]).unwrap_err();
+        drop(release);
+        peer.join().unwrap();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("must contain {expected} bytes, got 65535"))
+        );
+        assert!(chip.stream.is_none());
+    }
 
     #[test]
     fn a_socket_that_failed_is_not_used_again() {

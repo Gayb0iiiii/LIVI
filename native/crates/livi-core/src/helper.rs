@@ -95,6 +95,7 @@ fn settings(cfg: &Config) -> HelperSettings {
         theme: cfg.car_play_theme.clone(),
         bt_adapter: cfg.bt_adapter.clone(),
         mfi_files: cfg.car_play_mfi_files.clone(),
+        mfi_endpoint: cfg.car_play_mfi_endpoint.clone(),
         wifi_iface: cfg.wifi_interface.clone(),
         passphrase: cfg.wifi_password.clone(),
         wifi_type: livi_wifi::Band::setting(crate::wifi_options::band_of(cfg.wifi_type))
@@ -413,6 +414,17 @@ mod tests {
         after.car_type = before.car_type;
         after.wireless_aa_enabled = true;
         assert!(starts_differently(&before, &after));
+    }
+
+    #[test]
+    fn changing_the_mfi_endpoint_restarts_the_helper_and_forwards_the_setting() {
+        let before = defaults();
+        let mut after = before.clone();
+        after.car_play_mfi_endpoint = "127.0.0.1:15000".into();
+        assert!(starts_differently(&before, &after));
+        let env = helper_start(&after, &identity(), "88:00:33:77:8C:26", None).to_env();
+        assert_eq!(get(&env, "LIVI_MFI_ENDPOINT"), Some("127.0.0.1:15000"));
+        assert!(starts_differently(&after, &before));
     }
 
     #[test]

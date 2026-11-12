@@ -105,7 +105,7 @@ impl Drop for Embedded {
     }
 }
 
-fn chip(start: &HelperStart, host: &Host) -> Option<Box<dyn AuthCoprocessor + Send>> {
+fn local_chip(start: &HelperStart, host: &Host) -> Option<Box<dyn AuthCoprocessor + Send>> {
     if let Some(files) = crate::mfi::open_in(&host.mfi) {
         return Some(Box::new(files));
     }
@@ -133,7 +133,17 @@ fn chip(start: &HelperStart, host: &Host) -> Option<Box<dyn AuthCoprocessor + Se
 fn serve(start: HelperStart, host: Host) -> Held {
     #[cfg(target_os = "linux")]
     tokio::task::spawn_blocking(iap2_usbmux::drop_name_bound_profiles);
-    let chip = chip(&start, &host);
+    let endpoint_configured = !start.settings.mfi_endpoint.is_empty();
+    let chip = match crate::mfi::select(&start.settings.mfi_endpoint, || local_chip(&start, &host))
+    {
+        Ok(chip) => chip,
+        Err(error) => {
+            eprintln!(
+                "[helper] configured MFi endpoint failed: {error}; CarPlay authentication unavailable"
+            );
+            None
+        }
+    };
     let own_chip = chip.is_some();
     let link = watch_link(&host);
     let over_dongle = start.settings.bt_adapter == livi_link_host::link::CHOICE;
@@ -239,7 +249,15 @@ fn serve(start: HelperStart, host: Host) -> Held {
     };
     #[cfg(target_os = "linux")]
     let gone = || {};
-    crate::link::follow_link(link.clone(), auth.clone(), own_chip, bcast.clone(), gone);
+    // An explicit endpoint must never be replaced by a different identity when
+    // a LIVI Link arrives, even if the configured endpoint failed its check.
+    crate::link::follow_link(
+        link.clone(),
+        auth.clone(),
+        own_chip || endpoint_configured,
+        bcast.clone(),
+        gone,
+    );
     tokio::spawn(crate::link::identify_on_link(link.clone(), auth.clone()));
     if dongle_ap {
         tokio::spawn(crate::link::relay_stations(bcast.clone()));
@@ -393,6 +411,10 @@ fn serve(start: HelperStart, host: Host) -> Held {
         state,
         link: if own_chip {
             LinkPresence::always()
+        } else if endpoint_configured {
+            // Keep wired bring-up closed after an endpoint failure. Restart the
+            // helper once the forwarding connection/provider is available.
+            LinkPresence::new()
         } else {
             link
         },
