@@ -50,6 +50,7 @@ class ObserverTrialTests(unittest.TestCase):
                       '-DAX520_TEST_CONSOLE="' + str(cls.console) + '"',
                       str(HERE / "exec_interruption.c"), "-o", str(cls.interrupted_launcher)],
             common + [str(HERE / "task_visibility.c"), "-o", str(cls.artifacts / "task-visibility")],
+            common + [str(HERE / "exiting_process.c"), "-o", str(cls.artifacts / "exiting-process")],
         ]
         cls.build_failure = None
         for command in commands:
@@ -316,6 +317,12 @@ class ObserverTrialTests(unittest.TestCase):
         state = Path(f"/proc/{exits[0]}/stat").read_text().rsplit(")", 1)[1].split()[0]
         self.assertEqual(state, "Z")
         self.assertEqual(len([row for row in self.events() if row[0] == "start"]), 2)
+
+    def test_exit_during_identity_read_waits_for_death_and_uncertainty_never_signals(self):
+        result = subprocess.run([str(self.artifacts / "exiting-process")],
+                                capture_output=True, text=True, timeout=4)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "transition=0 uncertain=-1 waited=1 signal=-1 untouched=1\n")
 
     def test_unavailable_zombie_task_directory_is_uncertain_not_dead(self):
         empty = Path(self.case.name) / "empty"

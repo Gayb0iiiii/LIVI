@@ -203,7 +203,10 @@ static int wait_gone(const struct identity *identity, int duration) {
     int64_t deadline = now_ms() + duration;
     do {
         int state = alive(identity);
-        if (state != 1) return state == 0 ? 0 : -1;
+        if (state == 0) return 0;
+        /* Exit can invalidate exe/cmdline after a live stat snapshot. Observe
+         * again within the original deadline; uncertainty never permits a
+         * signal or counts as death, and signal_exact remains strict. */
         tick();
     } while (within(deadline));
     return -1;
