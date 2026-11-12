@@ -44,8 +44,10 @@ certificate, or identity is included in this change.
 
 Protocol availability is not authentication success. Real validation still needs
 the phone to accept the authentication exchange, followed by actual video, audio,
-touch, and reconnection tests. The stock AX520's live authentication path, native
-library ABI/lifecycle, and any device-local bridge remain unverified. Its web page,
+touch, and reconnection tests. The owner-relayed stock log identifies
+`PATH_I2C=ly_iap`, consistent with the software path in the static analysis.
+Phone acceptance, native library ABI/lifecycle in a wrapper, and any device-local
+bridge remain unverified. Its web page,
 Bluetooth pairing, and `05ac:12a8` USB enumeration do not establish those results.
 
 The current wired receiver discovers Apple VID devices, then requires CarPlay USB

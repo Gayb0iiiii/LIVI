@@ -13,6 +13,18 @@ The original backup is retained outside this repository. No firmware or propriet
 
 The [experimental external MFi provider](EXTERNAL-MFI.md) supplies a host integration point only. It does not implement or validate the stock device's provider.
 
+## Reported runtime evidence
+
+On 2026-11-12 the owner returned this filtered log line from Codex running on the Mac connected to the stock dongle's Wi-Fi and existing TCP 2323 shell:
+
+```text
+01-01 00:00:08.622   987   987 D linkapp : findMfi end ADDR_I2C = 20,PATH_I2C=ly_iap
+```
+
+This provides live evidence that `lylinkapp` selected `ly_iap` (address printed in hexadecimal: `0x20`). Combined with the dispatch below, it identifies the selected software authentication path. The device log clock is not synchronized; its January 1 timestamp is not the date of collection. This was owner-relayed output, not a direct shell collection by this environment.
+
+No `AUTHENTICATION_SUCCEEDED` event or successful CarPlay session was returned. Provider selection does not establish iPhone acceptance, the subsequent AirPlay exchange, video, audio, touch, or reconnection. The running library hash and device-local bridge still need verification.
+
 ## Verified selector and dispatch
 
 In `customer/app/libiap_new.so`:
