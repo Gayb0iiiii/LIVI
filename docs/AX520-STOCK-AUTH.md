@@ -1,15 +1,15 @@
 # AX520 stock authentication control flow
 
-Static analysis only, 2026-11-12. No stock binary was executed, no live settings changed, and no certificate, private key or decoded identity data was extracted. Addresses below are ARM ELF virtual addresses; stripped functions require Thumb disassembly (`objdump -M force-thumb`).
+Static analysis and bounded reads of existing runtime state, 2026-11-12. No additional stock binary was launched, no live settings changed during this analysis, and no certificate, private key or decoded identity data was extracted. Addresses below are ARM ELF virtual addresses; stripped functions require Thumb disassembly (`objdump -M force-thumb`).
 
 Analyzed backup SHA-256: `84e852d1da60dcca0f46c2a517419560d62b452d58093d59b590e6a021c05010`.
 The original backup is retained outside this repository. No firmware or proprietary library is included here.
 
-| File within customer partition | SHA-256 |
-| --- | --- |
-| `app/libiap_new.so` | `19326c5b73c61fd5a604d114ad49035a3730c7d12bfacaef165f7048e8f42e53` |
-| `app/lylinkapp` | `55afbb890397b41d3393f1a98a82a5d425fb5fb78b97431f8dad48990ce509f2` |
-| `app/ly_testcp` | `ffe245a28de3dba0bc115f08ea0ecad2d80a8b1ea1cab9a2902524375167339b` |
+| File within customer partition | SHA-256                                                            |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `app/libiap_new.so`            | `19326c5b73c61fd5a604d114ad49035a3730c7d12bfacaef165f7048e8f42e53` |
+| `app/lylinkapp`                | `55afbb890397b41d3393f1a98a82a5d425fb5fb78b97431f8dad48990ce509f2` |
+| `app/ly_testcp`                | `ffe245a28de3dba0bc115f08ea0ecad2d80a8b1ea1cab9a2902524375167339b` |
 
 The [experimental external MFi provider](EXTERNAL-MFI.md) supplies a host integration point only. It does not implement or validate the stock device's provider.
 
@@ -21,9 +21,33 @@ On 2026-11-12 the owner returned this filtered log line from Codex running on th
 01-01 00:00:08.622   987   987 D linkapp : findMfi end ADDR_I2C = 20,PATH_I2C=ly_iap
 ```
 
-This provides live evidence that `lylinkapp` selected `ly_iap` (address printed in hexadecimal: `0x20`). Combined with the dispatch below, it identifies the selected software authentication path. The device log clock is not synchronized; its January 1 timestamp is not the date of collection. This was owner-relayed output, not a direct shell collection by this environment.
+This provides live evidence that `lylinkapp` selected `ly_iap` (address printed in hexadecimal: `0x20`). Combined with the dispatch below, it identifies the selected software authentication path. The device log clock is not synchronized; its January 1 timestamp is not the date of collection. This line was initially owner-relayed and subsequently confirmed by a direct filtered shell read.
 
-No `AUTHENTICATION_SUCCEEDED` event or successful CarPlay session was returned. Provider selection does not establish iPhone acceptance, the subsequent AirPlay exchange, video, audio, touch, or reconnection. The running library hash and device-local bridge still need verification.
+That initial query did not return an explicit `AUTHENTICATION_SUCCEEDED` marker. Provider selection alone does not establish iPhone acceptance. Subsequent direct evidence is described below.
+
+### Direct runtime verification through the private Mac tunnel
+
+The existing shell was subsequently reached through a loopback-only reverse SSH tunnel on Cruiser. `uname` reported Linux 4.9.337 / ARMv7. SHA-256 checks of the running filesystem's `libiap_new.so`, `lylinkapp`, and `ly_testcp` matched the three values above. Process maps showed the stock process loading `/mnt/customer/app/libiap_new.so` and `libwcarplay_new.so`.
+
+An on-device allowlist returned these session markers, with unrelated log data excluded:
+
+```text
+01-01 00:30:58.358   987   994 D lin _iAPStateCbOverBT state = 1
+01-01 00:30:59.321   987  1318 D lin _iAPStateCbOverBT state = 3
+```
+
+The collection script retained a 36-character log prefix plus the exact matched event label, so the tag is truncated. Code tracing establishes the meaning of state 3:
+
+1. Incoming control-message parsing at `libiap_new.so:0xc844` reads the message ID from bytes 4/5 and dispatches it to the authentication handler at `0xd174`.
+2. Message `0xaa05` (`AUTHENTICATION_SUCCEEDED`, from iDevice to accessory) takes `0xd242` and invokes the auth-result delegate with zero at `0xd26c–0xd26e`. Message `0xaa04` takes the failure path.
+3. The registered delegate `0x6868` converts result zero to state **3** at `0x6890`, then calls the application callback. The reviewed other state-callback sites emit start=1, stop=2, or failure=4. State 4 is not uniquely an authentication rejection.
+4. `lylinkapp:0x183de–0x183f0` registers `_iAPStateCbOverBT` with `CreateiAP2`.
+
+Together, matching code and the observed state 3 support stock processing the phone's acceptance of this iAP2 authentication exchange using its selected software provider. They do not establish a subsequent AirPlay authentication exchange, active video/audio/touch, or reconnection reliability.
+
+The supervisor then logged `wait iap timeout(1)` through `(12)`, from uptime `00:30:59.322` through `00:31:10.326`. Worker 987 logged signal 15 at `00:31:11.327`; the supervisor forked replacement worker 1322 at `00:31:14.329`. This matches the reviewed post-authentication wait timeout and SIGTERM/restart flow. It is evidence of a deliberate timeout, not a demonstrated signer crash. The later connection stage remains unresolved.
+
+These reads did not rerun `ly_testcp`, invoke the signing API, force a provider selection, or change stock processes/settings. The device-local integration remains a separate, unverified implementation step.
 
 ## Verified selector and dispatch
 
@@ -41,12 +65,12 @@ Thus `ly_iap` is an explicit mode selector string. It is not opened as a device 
 
 - Signing function `0x6378` transforms an embedded 32-byte input into a temporary buffer via helper `0x633c`, allocates its output, and invokes internal helper `0x628c`. That helper copies a 32-byte input, performs internal computation through `0x615c`/`0x6228`, and copies two 32-byte result components to the output buffer. No external signing service or `/dev/ly_encry` call occurs in the displayed software entry routine.
 - Certificate function `0x6470` sets output length to **607**, allocates a fresh buffer, and invokes internal helper `0x633c` to populate it from embedded data. It returns zero on its normal path and minus one on allocation failure.
-- These are concrete software operations inside the library. Their existence does not prove stock selected this mode in a particular boot, that the identity is valid, or that an iPhone accepted it.
-- The entry arguments have the expected shapes `AuthDeviceCreateSignature(digest, digest_len, &output, &output_len)` and `AuthDeviceCopyCertificate(&output, &output_len)`. Fresh allocation is visible. ABI types, constructor requirements and safe ownership must still be checked before any wrapper is executed.
+- These are concrete software operations inside the library. Their existence alone does not prove selection or phone acceptance; the separate runtime evidence above addresses the observed iAP2 exchange.
+- The entry arguments have the expected shapes `AuthDeviceCreateSignature(digest, digest_len, &output, &output_len)` and `AuthDeviceCopyCertificate(&output, &output_len)`. Fresh allocation is visible. The ABI and ownership review below supplies static evidence; runtime wrapper compatibility remains unverified.
 - The inspected signing entry logs the supplied digest length but shows no rejection before the helper reads exactly 32 input bytes and writes 64 result bytes. A future wrapper must enforce the 32-byte input contract, validate advertised output length, and serialize calls because internal global scratch storage is visible. These are implementation prerequisites, not evidence that a wrapper has been tested.
 - The library is 32-bit ARM with uClibc dependencies `libstdc++.so.6`, `libgcc_s.so.1`, `libc.so.0`, plus ELF init/init-array entries. It cannot simply be loaded into Cruiser's native 64-bit process.
 
-No embedded credential bytes were inspected or recorded. No implementation or service wrapper has been added.
+No embedded credential bytes were inspected or recorded. No device service has been deployed.
 
 ## `/dev/ly_encry` detection in `ly_testcp`
 
@@ -67,7 +91,7 @@ Main calls this function at `0x12b0e`, stores the result at `0x12b12`, and logs 
 - The final diagnostic line is exactly `findMfi end ADDR_I2C = %x,PATH_I2C=%s`.
 - Bluetooth and Wi-Fi iAP setup both pass the selected address/path to `SetiAPI2CAddr` at `0x18464` and `0x18230` respectively.
 
-This establishes an actual static path from the successful driver probe to the software auth selector. It does not establish that the live unit took it.
+This establishes the static path from the successful driver probe to the software auth selector. The runtime path-selection log above shows the live unit selecting that path.
 
 ## Runtime prerequisites and existing logs
 
@@ -98,7 +122,6 @@ Interpretation:
 
 Safe prerequisites to read first are process presence, node existence, the expected stock library checksum, and `/tmp/lyrcpok`/`ly_author_*` marker **metadata only**. Do not rerun `ly_testcp`, force a mode, call the driver ioctl or execute a proposed signer wrapper before the runtime assumptions have been reviewed.
 
-
 ## ABI and startup safety follow-up
 
 This section remains static analysis. An independent stock-library wrapper has **not** been implemented or executed.
@@ -108,7 +131,7 @@ This section remains static analysis. An independent stock-library wrapper has *
 - ELF `.init` at `0x1b98` is a trivial return. The three init-array entries are `0x1fbd`, `0x1ed9`, and `0x1ee5`: frame/TM registration and two C++ iostream initialization stubs. Their reviewed call paths do not initialize authentication or open the MFi device. Fini-array entries `0x1f65`, `0x1ec1`, and `0x1ecd` perform matching runtime cleanup. This is evidence about these functions, not a guarantee about every dependency's loader behavior.
 - The auth-mode global resolves through GOT slot `0x29f84` to DSO-relative address `0x2a31c`. Its initial byte is **1**, the hardware mode. A separate process loading this DSO gets its own state; it does not inherit the selection already made by the running `lylinkapp`.
 - Calling `SetiAPI2CAddr` with the literal `ly_iap` directly selects mode 2 unconditionally. It does not rerun the stock `/dev/ly_encry` decision. Using it as a fallback after a failed or unverified device check would bypass the normal stock provider selection and is outside this proposed integration.
-- No exported getter for the actual selected provider was found. A timestamped log can establish what a running process selected, but loading another process does not transfer that state. Reusing the dispatch inside the existing stock process would preserve the actual decision; such process integration is itself unimplemented and requires a reviewed mechanism. An independent helper would need an independently validated equivalent of the normal selection procedure, with explicit failure handling. Forcing mode 2 is not that procedure.
+- No exported getter for the actual selected provider was found. A timestamped log can establish what a running process selected, but loading another process does not transfer that state. Reusing the dispatch inside the existing stock process would preserve the actual decision; such process integration requires a reviewed and validated mechanism. An independent helper would need an independently validated equivalent of the normal selection procedure, with explicit failure handling. Forcing mode 2 is not that procedure.
 
 ### Function shapes and ownership
 
@@ -126,6 +149,6 @@ The binary declares ARMv7/Cortex-A7, Thumb-2/NEON and hard-float EABI, and depen
 
 - `DestroyiAP2` calls internal auth finalization at `0x7368` and then dereferences the supplied context. It is **not** a standalone safe null-context auth cleanup function. No exported auth-only finalize function was found. The software finalizer at `0x650c` is a logging routine; the general iAP lifecycle also manages mutexes, transport and session resources.
 - The software helper uses global scratch state. Serialize any future requests and never race a change of provider against an active signature operation. Memory allocation and success return are not evidence that the phone accepted the result.
-- No exported protocol-major query was found. A 32-byte digest and 64-byte signature shape are consistent with an elliptic-curve provider but are not sufficient by themselves to establish all advertised authentication metadata. That metadata and normal on-device behavior remain runtime validation requirements.
-- Required live evidence is still: correct library hash on the current boot, the actual stock-selected mode/path in the running process, and phone handshake outcome. Inspect these before proposing process integration or an independent helper.
-- No credential export, stock binary execution, mode forcing, duplicate `lylinkapp`, authentication service, or device mutation was performed for this report.
+- No exported protocol-major query was found. Public curve constants at `0x13198` (field prime) and `0x13178` (subgroup order) match NIST P-256 and are referenced by the reviewed arithmetic. Output comprises two 32-byte big-endian components. This supports a P-256-compatible classification; it is not an independent verification of every signing operation. Advertising major 3 in a future LIVI adapter would be an inferred compatibility classification, not a measured stock register or an explicit stock advertisement.
+- Matching live library hashes, stock-selected mode/path, and the observed iAP2 phone acceptance are now established above. Remaining integration requirements include loader/ABI compatibility on this unit, preserving normal selection and lifecycle, serializing stock and external operations, and verifying the subsequent CarPlay exchange with the phone.
+- No credential export, additional stock binary launch, mode forcing, duplicate `lylinkapp`, authentication service, or device mutation was performed for this report.

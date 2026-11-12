@@ -28,11 +28,11 @@ normal error path without falling back.
 
 The service must implement the existing `iap2-mfi` network protocol:
 
-| Request | Payload | Successful response body |
-| --- | --- | --- |
-| `0x01` | none | Public authentication certificate |
-| `0x02` | big-endian u16 length, challenge bytes | Device-generated signature |
-| `0x03` | none | One byte: protocol major 2 or 3 |
+| Request | Payload                                | Successful response body          |
+| ------- | -------------------------------------- | --------------------------------- |
+| `0x01`  | none                                   | Public authentication certificate |
+| `0x02`  | big-endian u16 length, challenge bytes | Device-generated signature        |
+| `0x03`  | none                                   | One byte: protocol major 2 or 3   |
 
 Every response begins with a status byte (`0` success, `1` error) and a big-endian
 u16 body length. The existing client bounds requests to 1–128 challenge bytes,
@@ -44,11 +44,12 @@ certificate, or identity is included in this change.
 
 Protocol availability is not authentication success. Real validation still needs
 the phone to accept the authentication exchange, followed by actual video, audio,
-touch, and reconnection tests. The owner-relayed stock log identifies
-`PATH_I2C=ly_iap`, consistent with the software path in the static analysis.
-Phone acceptance, native library ABI/lifecycle in a wrapper, and any device-local
-bridge remain unverified. Its web page,
-Bluetooth pairing, and `05ac:12a8` USB enumeration do not establish those results.
+touch, and reconnection tests. Direct stock logs and matching binary hashes identify
+`PATH_I2C=ly_iap` and Bluetooth callback state 3, traced to receipt of the phone's
+iAP2 authentication-success message. The later stock connection timed out.
+Subsequent AirPlay authentication, native library ABI/lifecycle in a wrapper, and
+any device-local bridge remain unverified. Its web page, Bluetooth pairing, and
+`05ac:12a8` USB enumeration alone do not establish authentication or projection.
 
 The current wired receiver discovers Apple VID devices, then requires CarPlay USB
 configuration negotiation, usbmux, lockdown, and the carkit service. A stock
