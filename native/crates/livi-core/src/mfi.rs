@@ -9,9 +9,9 @@ use std::path::Path;
 
 use iap2_mfi::FileCoprocessor;
 use iap2_mfi::file::{CERTIFICATE_FILE, IDENTITY_FILE, certificate, identity_major};
+use livi_base::fs::{PRIVATE, write_atomic};
 use livi_core_proto::message::MfiFile;
 use livi_core_proto::state::Mfi;
-use sha2::{Digest, Sha256};
 
 fn name(file: MfiFile) -> &'static str {
     match file {
@@ -50,11 +50,7 @@ pub fn digest(dir: &Path) -> String {
     if FileCoprocessor::from_bytes(&cert, &key).is_err() {
         return String::new();
     }
-    let sum = Sha256::new()
-        .chain_update(&cert)
-        .chain_update(&key)
-        .finalize();
-    sum.iter().take(8).map(|b| format!("{b:02x}")).collect()
+    livi_base::hex::encode(&livi_crypto::sha256(&[&cert, &key])[..8])
 }
 
 pub fn import(dir: &Path, file: MfiFile, source: &Path) -> Result<(), String> {
@@ -67,11 +63,7 @@ pub fn import(dir: &Path, file: MfiFile, source: &Path) -> Result<(), String> {
     let written = || -> io::Result<()> {
         fs::create_dir_all(dir)?;
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
-        let target = dir.join(name(file));
-        let tmp = target.with_extension("new");
-        fs::write(&tmp, &bytes)?;
-        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
-        fs::rename(&tmp, &target)
+        write_atomic(&dir.join(name(file)), &bytes, PRIVATE)
     };
     written().map_err(|e| format!("{}: {e}", name(file)))
 }

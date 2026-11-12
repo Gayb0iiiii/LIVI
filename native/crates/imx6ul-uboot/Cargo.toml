@@ -1,9 +1,13 @@
 [package]
 name = "imx6ul-uboot"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 aes.workspace = true
 flate2.workspace = true
 lzokay-native.workspace = true
+
+[lints]
+workspace = true

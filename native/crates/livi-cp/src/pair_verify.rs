@@ -4,13 +4,14 @@
 
 use std::collections::BTreeMap;
 
-use crate::crypto::{
-    X25519, chacha_open, chacha_seal, ed25519_sign, ed25519_verify, hkdf_sha512, nonce_label,
-};
 use crate::identity::Identity;
 use crate::pair_setup::{error_reply, tlv};
 use crate::pairings::Pairings;
+use crate::session_keys;
 use crate::tlv8;
+use livi_crypto::{
+    X25519, chacha_open, chacha_seal, ed25519_sign, ed25519_verify, hkdf_sha512, nonce_label,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ControlKeys {
@@ -34,6 +35,7 @@ impl PairVerify {
         Self::default()
     }
 
+    #[cfg(test)]
     pub fn verified(&self) -> bool {
         self.keys.is_some()
     }
@@ -155,10 +157,8 @@ impl PairVerify {
             return Err((4, "controller signature invalid".into()));
         }
 
-        self.keys = Some(ControlKeys {
-            read: hkdf_sha512(&shared, b"Control-Salt", b"Control-Write-Encryption-Key"),
-            write: hkdf_sha512(&shared, b"Control-Salt", b"Control-Read-Encryption-Key"),
-        });
+        let (read, write) = session_keys::control(&shared);
+        self.keys = Some(ControlKeys { read, write });
         println!("[cp] pair-verify M3->M4, verified {controller}");
         self.controller = Some(controller);
         Ok(tlv8::encode(&[(tlv::STATE, &[4])]))
@@ -168,10 +168,10 @@ impl PairVerify {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::{ed25519_public, random_bytes};
     use crate::identity::load_or_create;
     use crate::pair_setup::ERR_AUTHENTICATION;
     use crate::pairings::tests::TempDir;
+    use livi_crypto::{ed25519_public, random_bytes};
 
     struct Phone {
         secret: [u8; 32],

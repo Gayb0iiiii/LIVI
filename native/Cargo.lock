@@ -25,16 +25,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "aead"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1973cfbc1a2daf9cf550e74e1f088c28e7f7d8c1e1418fb6c9dc5184b7e84c99"
-dependencies = [
- "crypto-common 0.2.2",
- "inout",
-]
-
-[[package]]
 name = "aes"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -197,7 +187,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "parking_lot",
  "percent-encoding",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
  "wl-clipboard-rs",
  "x11rb",
 ]
@@ -522,7 +512,7 @@ dependencies = [
  "clang-sys",
  "itertools 0.13.0",
  "log",
- "prettyplease",
+ "prettyplease 0.2.37",
  "proc-macro2",
  "quote",
  "regex",
@@ -811,21 +801,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 dependencies = [
  "cfg-if",
- "cipher",
  "cpufeatures 0.3.1",
  "rand_core 0.10.1",
-]
-
-[[package]]
-name = "chacha20poly1305"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b89e1c441e926b9c82a8d023f6e1b7ae0adcfaa7d621814e4d60789bac751cb"
-dependencies = [
- "aead",
- "chacha20",
- "cipher",
- "poly1305",
 ]
 
 [[package]]
@@ -848,7 +825,6 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf2a2c93cd704877c0858356ed03480ff301ee950b43f1cbe4573b088bfa6c"
 dependencies = [
- "block-buffer 0.12.1",
  "crypto-common 0.2.2",
  "inout",
 ]
@@ -1195,15 +1171,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctr"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baaca1c4b237092596f64d571e9db6ce4109c4ef9742e27590f1709594461f21"
-dependencies = [
- "cipher",
-]
-
-[[package]]
 name = "ctutils"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1218,33 +1185,6 @@ name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
-
-[[package]]
-name = "curve25519-dalek"
-version = "5.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5eed333089e2e1c1ac8c6c0398e5e2497b4c9926ca6d0365ed1e099afa5bc23"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.3.1",
- "curve25519-dalek-derive",
- "digest 0.11.3",
- "fiat-crypto",
- "rustc_version",
- "subtle",
- "zeroize",
-]
-
-[[package]]
-name = "curve25519-dalek-derive"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
 
 [[package]]
 name = "darling"
@@ -1552,28 +1492,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ed25519"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29fcf32e6c73d1079f83ab4d782de2d81620346a5f38c6237a86a22f8368980a"
-dependencies = [
- "signature 3.0.0",
-]
-
-[[package]]
-name = "ed25519-dalek"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ebaa1a2bf1290ab3bfe5a7b771d050ebffab2711c19a81691c683a5144a25de"
-dependencies = [
- "curve25519-dalek",
- "ed25519",
- "sha2 0.11.1",
- "subtle",
- "zeroize",
-]
-
-[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1706,7 +1624,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc 0.2.191",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1786,12 +1704,6 @@ dependencies = [
  "rand_core 0.10.1",
  "subtle",
 ]
-
-[[package]]
-name = "fiat-crypto"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64cd1e32ddd350061ae6edb1b082d7c54915b5c672c389143b9a63403a109f24"
 
 [[package]]
 name = "field-offset"
@@ -2197,7 +2109,7 @@ dependencies = [
  "gobject-sys",
  "libc 0.2.191",
  "system-deps",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2663,15 +2575,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
-name = "hkdf"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aaa26c720c68b866f2c96ef5c1264b3e6f473fe5d4ce61cd44bbe913e553018"
-dependencies = [
- "hmac",
-]
-
-[[package]]
 name = "hmac"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3134,15 +3037,15 @@ dependencies = [
 
 [[package]]
 name = "iap2-csm"
-version = "0.1.0"
+version = "10.5.0"
 
 [[package]]
 name = "iap2-link"
-version = "0.1.0"
+version = "10.5.0"
 
 [[package]]
 name = "iap2-mfi"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "base64 0.23.1",
  "libc 1.0.0-alpha.5",
@@ -3153,21 +3056,26 @@ dependencies = [
 
 [[package]]
 name = "iap2-usbmux"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "libc 1.0.0-alpha.5",
+ "livi-base",
+ "livi-session-io",
  "nusb 0.2.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "nusb 0.2.9 (git+https://github.com/f-io/nusb?rev=10895e1a7c762498324cb1c36a4b67cf60083235)",
+ "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
 name = "iap2-wired"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "iap2-usbmux",
  "idevice",
  "plist",
+ "thiserror 2.0.21",
  "tokio",
  "uuid",
 ]
@@ -3434,7 +3342,7 @@ checksum = "6e44b0a4eaa4c82f441d50a963f2d5f05a787240aeee097597033e72accfd22f"
 
 [[package]]
 name = "imx6ul-uboot"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "aes",
  "flate2",
@@ -3529,15 +3437,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
@@ -3562,9 +3461,9 @@ dependencies = [
 
 [[package]]
 name = "jiff"
-version = "0.2.42"
+version = "0.2.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fefca06093eeaed707a905795e68206da0edca4edef23d2a3997a3ddbee462aa"
+checksum = "26699905cc795a23e3949585cc7ba3ee8ade090872a27e4316304a777297894a"
 dependencies = [
  "jiff-core",
  "jiff-static",
@@ -3577,18 +3476,18 @@ dependencies = [
 
 [[package]]
 name = "jiff-core"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77a24020db0ee88d1c681d677681bd31f9f4ea189a455425223d52ce4f1508aa"
+checksum = "ffe6854081f5ac0a3046a9b223729ccd7a20b1e0e8277e44dc0660eedf67dfe2"
 dependencies = [
  "log",
 ]
 
 [[package]]
 name = "jiff-static"
-version = "0.2.42"
+version = "0.2.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41d3213549742662eea1a18e6c5af9be5dfbabeb7611ab71356a54928ec398f0"
+checksum = "4b4ff49b2887190c760b86207b55cdcaabbdecaf7a0660d68aa2ed6f652abf0a"
 dependencies = [
  "jiff-core",
  "proc-macro2",
@@ -3883,11 +3782,10 @@ checksum = "4744e383959f0db86ede514b809b1c53251889093803c05267acc7d4e7030d70"
 
 [[package]]
 name = "livi-aa"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
- "futures-util",
  "livi-aa-proto",
- "livi-host-proto",
+ "livi-output-proto",
  "livi-session-io",
  "livi-wifi",
  "nusb 0.2.9 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3895,7 +3793,6 @@ dependencies = [
  "prost",
  "rustls",
  "rustls-pemfile",
- "rustls-pki-types",
  "serde_json",
  "socket2",
  "tokio",
@@ -3903,7 +3800,7 @@ dependencies = [
 
 [[package]]
 name = "livi-aa-proto"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "prost",
  "prost-build",
@@ -3912,20 +3809,22 @@ dependencies = [
 
 [[package]]
 name = "livi-aa-stack"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "livi-aa-proto",
+ "livi-base",
  "livi-core-proto",
  "livi-session-io",
  "livi-wifi",
  "prost",
  "serde_json",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
 [[package]]
 name = "livi-aaudio"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "gstreamer",
  "gstreamer-audio",
@@ -3943,9 +3842,9 @@ dependencies = [
  "livi-aaudio",
  "livi-core",
  "livi-core-client",
- "livi-gst-host",
  "livi-helper",
- "livi-host-proto",
+ "livi-output",
+ "livi-output-proto",
  "livi-ui",
  "livi-ui-model",
  "livi-video-player",
@@ -3956,42 +3855,41 @@ dependencies = [
 
 [[package]]
 name = "livi-audio"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "gstreamer",
  "gstreamer-app",
  "gstreamer-audio",
  "gstreamer-controller",
  "libc 1.0.0-alpha.5",
+ "livi-base",
  "livi-crypto",
- "livi-host-proto",
+ "livi-output-proto",
  "socket2",
 ]
 
 [[package]]
-name = "livi-bt-host"
-version = "0.1.0"
-dependencies = [
- "livi-net",
-]
+name = "livi-base"
+version = "10.5.0"
 
 [[package]]
-name = "livi-btd"
-version = "0.1.0"
+name = "livi-bt-host"
+version = "10.5.0"
 dependencies = [
- "libc 1.0.0-alpha.5",
+ "livi-base",
  "livi-net",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "livi-compositor"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "ab_glyph",
  "calloop-wayland-source 0.4.1",
  "env_logger",
  "fontdb",
- "livi-host-proto",
+ "livi-output-proto",
  "log",
  "nix",
  "smithay",
@@ -4012,15 +3910,17 @@ dependencies = [
  "libc 1.0.0-alpha.5",
  "livi-aa-stack",
  "livi-aaudio",
+ "livi-base",
  "livi-core-proto",
  "livi-cp",
+ "livi-crypto",
  "livi-dab",
  "livi-fm",
- "livi-host-proto",
  "livi-i18n",
  "livi-link-host",
  "livi-media",
  "livi-net",
+ "livi-output-proto",
  "livi-rtlsdr",
  "livi-session-io",
  "livi-wifi",
@@ -4028,7 +3928,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "skrifa 0.49.0",
+ "skrifa 0.50.0",
  "socketioxide",
  "tokio",
  "tower-http 0.7.1",
@@ -4037,7 +3937,7 @@ dependencies = [
 
 [[package]]
 name = "livi-core-client"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "libc 1.0.0-alpha.5",
  "livi-core-proto",
@@ -4046,9 +3946,10 @@ dependencies = [
 
 [[package]]
 name = "livi-core-proto"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "base64 0.23.1",
+ "livi-base",
  "serde",
  "serde_json",
  "serde_repr",
@@ -4056,17 +3957,13 @@ dependencies = [
 
 [[package]]
 name = "livi-cp"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
- "aes",
  "base64 0.23.1",
- "chacha20poly1305",
- "ctr",
- "ed25519-dalek",
  "foreign-types 0.3.2",
- "getrandom 0.4.3",
- "hkdf",
+ "livi-base",
  "livi-core-proto",
+ "livi-crypto",
  "livi-net",
  "livi-session-io",
  "num-bigint",
@@ -4074,82 +3971,85 @@ dependencies = [
  "openssl-sys",
  "serde",
  "serde_json",
- "sha1 0.11.0",
- "sha2 0.11.1",
  "socket2",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-openssl",
  "uuid",
- "x25519-dalek",
 ]
 
 [[package]]
 name = "livi-crypto"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "aws-lc-rs",
 ]
 
 [[package]]
 name = "livi-dab"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "rustfft",
 ]
 
 [[package]]
 name = "livi-fm"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "livi-dab",
 ]
 
 [[package]]
-name = "livi-gst-host"
-version = "0.1.0"
-dependencies = [
- "glib",
- "glib-unix",
- "libc 1.0.0-alpha.5",
- "livi-audio",
- "livi-host-proto",
- "livi-screen-stream",
- "livi-video",
- "livi-video-player",
- "livi-video-view",
- "realfft",
-]
-
-[[package]]
 name = "livi-helper"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "iap2-link",
  "iap2-mfi",
  "iap2-usbmux",
  "iap2-wired",
  "livi-aa",
+ "livi-base",
  "livi-bt-host",
  "livi-core-proto",
+ "livi-helper-stack",
  "livi-hfp",
  "livi-link-host",
  "livi-mdns",
  "livi-net",
- "livi-runtime",
  "livi-wifi",
- "serde_json",
  "tokio",
 ]
 
 [[package]]
+name = "livi-helper-stack"
+version = "10.5.0"
+dependencies = [
+ "base64 0.23.1",
+ "iap2-csm",
+ "iap2-link",
+ "iap2-mfi",
+ "libc 1.0.0-alpha.5",
+ "livi-base",
+ "livi-core-proto",
+ "livi-hfp",
+ "livi-output-proto",
+ "livi-wifi",
+ "serde_json",
+ "socket2",
+ "thiserror 2.0.21",
+ "tokio",
+ "zbus 6.2.1",
+]
+
+[[package]]
 name = "livi-helperd"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "libc 1.0.0-alpha.5",
  "livi-core-proto",
  "livi-helper",
+ "livi-helper-stack",
  "livi-link-host",
- "livi-runtime",
  "livi-wifi",
  "serde_json",
  "tokio",
@@ -4157,52 +4057,69 @@ dependencies = [
 
 [[package]]
 name = "livi-hfp"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "libc 1.0.0-alpha.5",
 ]
 
 [[package]]
-name = "livi-host-proto"
-version = "0.1.0"
-
-[[package]]
 name = "livi-i18n"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
-name = "livi-link-host"
-version = "0.1.0"
+name = "livi-link-ap"
+version = "10.5.0"
 dependencies = [
- "futures-util",
- "iap2-usbmux",
+ "livi-base",
+ "livi-link-hci",
+ "livi-wifi",
+]
+
+[[package]]
+name = "livi-link-hci"
+version = "10.5.0"
+dependencies = [
  "libc 1.0.0-alpha.5",
  "livi-net",
+]
+
+[[package]]
+name = "livi-link-host"
+version = "10.5.0"
+dependencies = [
+ "iap2-usbmux",
+ "libc 1.0.0-alpha.5",
+ "livi-base",
+ "livi-net",
+ "livi-session-io",
  "livi-wifi",
  "nusb 0.2.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "nusb 0.2.9 (git+https://github.com/f-io/nusb?rev=10895e1a7c762498324cb1c36a4b67cf60083235)",
+ "thiserror 2.0.21",
  "tokio",
 ]
 
 [[package]]
 name = "livi-link-provision"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "backhand",
  "imx6ul-uboot",
+ "livi-base",
+ "livi-crypto",
  "md-5",
+ "rustls",
  "serde",
  "serde_json",
- "sha2 0.11.1",
  "ureq",
 ]
 
 [[package]]
 name = "livi-link-provision-cli"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "livi-link-host",
  "livi-link-provision",
@@ -4213,7 +4130,7 @@ dependencies = [
 
 [[package]]
 name = "livi-mdns"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "libc 1.0.0-alpha.5",
  "socket2",
@@ -4221,51 +4138,55 @@ dependencies = [
 
 [[package]]
 name = "livi-media"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
+ "livi-base",
  "livi-core-proto",
- "livi-host-proto",
- "serde_json",
+ "livi-output-proto",
  "tokio",
 ]
 
 [[package]]
 name = "livi-net"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "libc 1.0.0-alpha.5",
 ]
 
 [[package]]
+name = "livi-output"
+version = "10.5.0"
+dependencies = [
+ "glib",
+ "glib-unix",
+ "libc 1.0.0-alpha.5",
+ "livi-audio",
+ "livi-output-proto",
+ "livi-screen-stream",
+ "livi-video",
+ "livi-video-player",
+ "livi-video-view",
+ "realfft",
+]
+
+[[package]]
+name = "livi-output-proto"
+version = "10.5.0"
+dependencies = [
+ "livi-base",
+]
+
+[[package]]
 name = "livi-rtlsdr"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "nusb 0.2.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "nusb 0.2.9 (git+https://github.com/f-io/nusb?rev=10895e1a7c762498324cb1c36a4b67cf60083235)",
 ]
 
 [[package]]
-name = "livi-runtime"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "iap2-csm",
- "iap2-link",
- "iap2-mfi",
- "libc 1.0.0-alpha.5",
- "livi-core-proto",
- "livi-hfp",
- "livi-host-proto",
- "livi-wifi",
- "serde_json",
- "socket2",
- "tokio",
- "zbus 6.2.1",
-]
-
-[[package]]
 name = "livi-screen-stream"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "glib",
  "glib-unix",
@@ -4276,12 +4197,16 @@ dependencies = [
 
 [[package]]
 name = "livi-session-io"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
+ "futures-util",
+ "livi-base",
  "nusb 0.2.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "nusb 0.2.9 (git+https://github.com/f-io/nusb?rev=10895e1a7c762498324cb1c36a4b67cf60083235)",
  "serde_json",
+ "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -4307,8 +4232,9 @@ dependencies = [
 
 [[package]]
 name = "livi-ui-model"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
+ "livi-base",
  "livi-core-proto",
  "livi-i18n",
  "serde_json",
@@ -4316,72 +4242,65 @@ dependencies = [
 
 [[package]]
 name = "livi-video"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
- "livi-host-proto",
+ "livi-output-proto",
 ]
 
 [[package]]
 name = "livi-video-player"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "gstreamer",
  "gstreamer-app",
  "gstreamer-base",
  "gstreamer-video",
- "livi-host-proto",
+ "livi-output-proto",
  "livi-video",
 ]
 
 [[package]]
 name = "livi-video-view"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "cc",
- "livi-host-proto",
+ "livi-output-proto",
  "livi-video-player",
  "pkg-config",
 ]
 
 [[package]]
 name = "livi-web"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "libc 1.0.0-alpha.5",
+ "livi-base",
+ "livi-link-ap",
  "livi-net",
  "livi-wifi",
- "livi-wifid",
 ]
 
 [[package]]
 name = "livi-wifi"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "libc 1.0.0-alpha.5",
-]
-
-[[package]]
-name = "livi-wifid"
-version = "0.1.0"
-dependencies = [
- "libc 1.0.0-alpha.5",
- "livi-btd",
- "livi-net",
- "livi-wifi",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "livid"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "iap2-mfi",
  "imx6ul-uboot",
  "libc 1.0.0-alpha.5",
- "livi-btd",
+ "livi-base",
+ "livi-link-ap",
+ "livi-link-hci",
  "livi-mdns",
  "livi-net",
  "livi-web",
- "livi-wifid",
 ]
 
 [[package]]
@@ -4610,7 +4529,7 @@ dependencies = [
 
 [[package]]
 name = "mkbootimg-v821b"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "flate2",
 ]
@@ -5373,7 +5292,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc 0.2.191",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -5659,16 +5578,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "poly1305"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e2d0073b297041425c7c3df6eb4792d598a15323fe63346852b092eca02904c"
-dependencies = [
- "cpufeatures 0.3.1",
- "universal-hash",
-]
-
-[[package]]
 name = "polycool"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5735,6 +5644,16 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "prettyplease"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bfe0f4c752e450fc2faf62654f1c134747922825d5b04ca717b8874f41a40c0"
+dependencies = [
+ "proc-macro2",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -5822,9 +5741,9 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.14.4"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
+checksum = "c9f016da56b311cff4659f5e7335c4d5fda5ca86cae4f48b8ce1cf3335246a7d"
 dependencies = [
  "bytes",
  "prost-derive",
@@ -5832,31 +5751,31 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.14.4"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
+checksum = "f461f69b0cacd7a9c2bcac932e0f3a22cb13c29fc9023092502995a771a10491"
 dependencies = [
  "heck",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "log",
  "multimap",
  "petgraph",
- "prettyplease",
+ "prettyplease 0.3.0",
  "prost",
  "prost-types",
  "regex",
- "syn 2.0.119",
+ "syn 3.0.9",
  "tempfile",
 ]
 
 [[package]]
 name = "prost-derive"
-version = "0.14.4"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
+checksum = "c9a367f131d93b3395fc6207c11e67098493ab040def4ce3085adbf186687f7e"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -5876,9 +5795,9 @@ dependencies = [
 
 [[package]]
 name = "prost-types"
-version = "0.14.4"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
+checksum = "96e89651c132da91958fd6092a2f7262c2c36c08df4f68af0bb3591caacbbb45"
 dependencies = [
  "prost",
 ]
@@ -6005,7 +5924,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6176,9 +6095,9 @@ dependencies = [
 
 [[package]]
 name = "read-fonts"
-version = "0.46.0"
+version = "0.47.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bdaa4fffe9ff3ca2c353fa9729792805b9b3e324695ff5a081f860612e81b330"
+checksum = "a39d2f8f681030a7bcbbcf3e8568775ac2393afd51401a2e2133ee89e3953897"
 dependencies = [
  "bytemuck",
  "foldhash 0.2.0",
@@ -6486,7 +6405,7 @@ dependencies = [
  "errno",
  "libc 0.2.191",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6498,7 +6417,6 @@ dependencies = [
  "aws-lc-rs",
  "log",
  "once_cell",
- "ring",
  "rustls-pki-types",
  "rustls-webpki",
  "subtle",
@@ -6554,7 +6472,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6938,13 +6856,13 @@ dependencies = [
 
 [[package]]
 name = "skrifa"
-version = "0.49.0"
+version = "0.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7459fb60888ad9a5f367dd293fa2fb9df142cb451aa6bfd6cd66a7d6a9b739d"
+checksum = "e85ba678a6023a063d0a78c8770f1c166674ef46af13523d05eff67430f79dfe"
 dependencies = [
  "bytemuck",
  "once_cell",
- "read-fonts 0.46.0",
+ "read-fonts 0.47.0",
  "smallvec",
  "yoke",
 ]
@@ -7496,7 +7414,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.6",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8042,16 +7960,6 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
-
-[[package]]
-name = "universal-hash"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4987bdc12753382e0bec4a65c50738ffaabc998b9cdd1f952fb5f39b0048a96"
-dependencies = [
- "crypto-common 0.2.2",
- "ctutils",
-]
 
 [[package]]
 name = "untrusted"
@@ -8697,7 +8605,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -9197,18 +9105,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
-name = "x25519-dalek"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7e8131a03190127fb2263afc72b322ecadae46b6ff8c6f399ff5d02f5559af6"
-dependencies = [
- "curve25519-dalek",
- "getrandom 0.4.3",
- "rand_core 0.10.1",
- "zeroize",
-]
-
-[[package]]
 name = "x509-cert"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9296,7 +9192,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "10.5.0"
 dependencies = [
  "serde_json",
 ]

@@ -1,10 +1,8 @@
 [package]
 name = "livi-screen-stream"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
-
-[lib]
-crate-type = ["rlib"]
+license.workspace = true
 
 [dependencies]
 livi-video.workspace = true
@@ -12,3 +10,6 @@ livi-crypto.workspace = true
 glib.workspace = true
 glib-unix.workspace = true
 socket2.workspace = true
+
+[lints]
+workspace = true

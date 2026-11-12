@@ -6,7 +6,7 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use gstreamer_base as gst_base;
-use livi_host_proto::VideoCodec;
+use livi_output_proto::VideoCodec;
 use std::sync::{Arc, Once};
 
 #[cfg(target_os = "android")]
@@ -85,7 +85,7 @@ pub fn log_bus_messages(pipeline: &gst::Pipeline) {
             }
             _ => {}
         }
-        gst::BusSyncReply::Pass
+        gst::BusSyncReply::Drop
     });
 }
 
@@ -327,7 +327,7 @@ impl Player {
                 } else {
                     ""
                 },
-                std::env::var("LIVI_GST_SINK").ok().as_deref(),
+                livi_video::codec::sink_override().as_deref(),
             )
         };
 

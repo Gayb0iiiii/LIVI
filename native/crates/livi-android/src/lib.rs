@@ -14,6 +14,7 @@ mod media;
 mod planes;
 mod update;
 
+use std::io;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -24,7 +25,7 @@ use jni::errors::LogErrorAndDefault;
 use jni::objects::{JClass, JObject, JString};
 use jni::sys::{jboolean, jfloat, jint};
 use jni::{EnvUnowned, JValue, jni_sig, jni_str};
-use livi_core::{Exit, Helper, Installer, Instance, MediaHost, Paths, Resources};
+use livi_core::{Exit, Helper, Installer, Instance, OutputBackend, Paths, Resources};
 use livi_helper::embedded::{Embedded, Host};
 use slint::android::AndroidApp;
 use slint::android::android_activity::WindowManagerFlags;
@@ -75,7 +76,7 @@ fn core(app: &AndroidApp) -> Result<PathBuf, String> {
     livi_aaudio::register().map_err(|e| format!("no AAudio elements: {e}"))?;
     livi_aaudio::set_lister(audio::lister());
     livi_video_player::set_views(planes::Planes);
-    livi_video_view::set_window(livi_host_proto::SCREENS[0], planes::STAGE);
+    livi_video_view::set_window(livi_output_proto::SCREENS[0], planes::STAGE);
     livi_video_view::serve(&paths.runtime.join("compositor.ctrl"))
         .map_err(|e| format!("no video control: {e}"))?;
     let host = Host {
@@ -85,7 +86,7 @@ fn core(app: &AndroidApp) -> Result<PathBuf, String> {
         tunnel: iap2_usbmux::Tunnel::new(Arc::new(tun)),
         phones: Arc::new(bluetooth::phones),
         hotspot: Arc::new(hotspot::open),
-        drop_phone: Arc::new(bluetooth::drop),
+        drop_phone: Arc::new(|mac| bluetooth::drop(mac).map_err(Into::into)),
         page_phone: Arc::new(bluetooth::page),
         bt_keys: files.join("bluetooth-keys"),
     };
@@ -95,7 +96,7 @@ fn core(app: &AndroidApp) -> Result<PathBuf, String> {
                 .map(|helper| Box::new(helper) as Box<dyn Send>)
                 .map_err(|e| format!("no helper thread: {e}"))
         }))),
-        gst_host: Some(MediaHost::Embedded(Arc::new(media::InProcess))),
+        output: Some(OutputBackend::Embedded(Arc::new(media::InProcess))),
         installer: Some(Installer {
             downloads: files.join("update"),
             install: Arc::new(update::install),
@@ -144,7 +145,7 @@ fn pick() {
     }
 }
 
-fn tun(request: &TunRequest) -> Result<OwnedFd, String> {
+fn tun(request: &TunRequest) -> io::Result<OwnedFd> {
     let fd = activity::with(|env, activity| {
         let addresses = request
             .addresses
@@ -164,10 +165,11 @@ fn tun(request: &TunRequest) -> Result<OwnedFd, String> {
         )?
         .i()
     })
-    .map_err(|e| format!("VPN service: {e}"))?;
+    .map_err(|e| io::Error::other(format!("VPN service: {e}")))?;
     if fd < 0 {
-        return Err("the VPN service opened no interface".into());
+        return Err(io::Error::other("the VPN service opened no interface"));
     }
+    // SAFETY: Java detached the tun fd and hands its ownership over.
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 

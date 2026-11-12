@@ -17,12 +17,11 @@ use tokio::sync::{broadcast, mpsc, watch};
 use crate::auth_setup;
 use crate::bplist::{self, Value, dict};
 use crate::control_cipher::ControlCipher;
-use crate::crypto::hkdf_sha512;
 use crate::helper_sock::HelperSock;
 use crate::hid::{self, Contact, KnobState};
 use crate::hls::Client;
 use crate::hls_gateway::Gateway;
-use crate::iap_tunnel::IapTunnel;
+use crate::iap_tunnel::{self, IapTunnel};
 use crate::identity::Identity;
 use crate::info::{self, InfoConfig};
 use crate::keep_alive::KeepAlive;
@@ -33,6 +32,7 @@ use crate::pair_setup::PairSetup;
 use crate::pair_verify::PairVerify;
 use crate::pairings::Pairings;
 use crate::rtsp::{self, Request, Response};
+use crate::session_keys;
 use crate::timing::ntp64_now;
 use crate::timing_sync::TimingSync;
 use crate::ui_sync;
@@ -319,15 +319,15 @@ struct Conn<M: Media> {
     main_stream_ready: bool,
     audio: Vec<AudioStreamState>,
     iap_tunnel: Option<IapTunnel>,
-    iap_out: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
+    iap_out: Option<mpsc::Receiver<Vec<u8>>>,
     iap_relay: Option<(UnixRead, UnixWrite)>,
     video_playback: bool,
     video_capture: Option<video_playback::Capture>,
     last_stream_id: u64,
     video_settings: Option<IapTunnel>,
-    video_settings_out: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
+    video_settings_out: Option<mpsc::Receiver<Vec<u8>>>,
     video_overlay: Option<IapTunnel>,
-    video_overlay_out: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
+    video_overlay_out: Option<mpsc::Receiver<Vec<u8>>>,
     ui_sync_on: bool,
     ui_sync: Option<(IapTunnel, mpsc::UnboundedSender<Vec<u8>>)>,
     ui_sync_out: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
@@ -425,7 +425,14 @@ async fn read_relay(
     }
 }
 
-async fn recv_iap<T>(out: &mut Option<mpsc::UnboundedReceiver<T>>) -> Option<T> {
+async fn recv_iap<T>(out: &mut Option<mpsc::Receiver<T>>) -> Option<T> {
+    match out {
+        Some(rx) => rx.recv().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn recv_delivered<T>(out: &mut Option<mpsc::UnboundedReceiver<T>>) -> Option<T> {
     match out {
         Some(rx) => rx.recv().await,
         None => std::future::pending().await,
@@ -512,7 +519,7 @@ fn status(code: u16) -> Response {
     }
 }
 
-fn octet(result: Result<Vec<u8>, String>, what: &str) -> Response {
+fn octet(result: Result<Vec<u8>, impl std::fmt::Display>, what: &str) -> Response {
     match result {
         Ok(body) => Response {
             headers: vec![("Content-Type".into(), OCTET.into())],
@@ -535,14 +542,6 @@ fn header_number(req: &Request, name: &str) -> Option<u32> {
     } else {
         v.parse().ok()
     }
-}
-
-fn stream_key(shared: &[u8; 32], id: &str, info: &str) -> [u8; 32] {
-    hkdf_sha512(
-        shared,
-        format!("DataStream-Salt{id}").as_bytes(),
-        info.as_bytes(),
-    )
 }
 
 pub async fn run<M: Media>(
@@ -705,7 +704,7 @@ pub async fn run<M: Media>(
                 Some(iap) => conn.relay_iap(&iap).await,
                 None => conn.iap_out = None,
             },
-            sync = recv_iap(&mut conn.ui_sync_out) => match sync {
+            sync = recv_delivered(&mut conn.ui_sync_out) => match sync {
                 Some(message) => conn.on_ui_sync(&message),
                 None => conn.ui_sync_out = None,
             },
@@ -717,7 +716,7 @@ pub async fn run<M: Media>(
                 Some(setting) => conn.keep_side_message("settings", &setting),
                 None => conn.video_settings_out = None,
             },
-            vehicle = recv_iap(&mut conn.vehicle_out) => match vehicle {
+            vehicle = recv_delivered(&mut conn.vehicle_out) => match vehicle {
                 Some((lane, message)) => conn.on_vehicle_message(lane, &message),
                 None => conn.vehicle_out = None,
             },

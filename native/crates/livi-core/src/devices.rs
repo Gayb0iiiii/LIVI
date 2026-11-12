@@ -3,8 +3,10 @@
 // Additional terms: see NOTICE
 
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
+use livi_base::fs::{SHARED, write_atomic};
+use livi_base::time::unix_ms;
 use livi_core_proto::ids::{Ids, norm_mac};
 use livi_core_proto::state::{DeviceStatus, DeviceView, Protocol};
 use livi_cp::helper_sock::HelperSock;
@@ -136,12 +138,6 @@ fn real_name(v: Option<&str>) -> Option<String> {
     (!name.is_empty() && !name.eq_ignore_ascii_case("android")).then(|| name.to_string())
 }
 
-fn now_ms() -> f64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0.0, |d| d.as_millis() as f64)
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct Seen {
     pub ids: Ids,
@@ -228,9 +224,7 @@ impl Registry {
         let Ok(text) = serde_json::to_string_pretty(&stored) else {
             return;
         };
-        let tmp = self.path.with_extension("json.tmp");
-        let written = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, &self.path));
-        if let Err(e) = written {
+        if let Err(e) = write_atomic(&self.path, text, SHARED) {
             eprintln!("[devices] {} not saved: {e}", self.path.display());
         }
     }
@@ -334,7 +328,7 @@ impl Registry {
         } else {
             e.present.wifi = true;
         }
-        s.last_seen = Some(now_ms());
+        s.last_seen = Some(unix_ms().floor());
         self.persist();
     }
 
@@ -346,7 +340,7 @@ impl Registry {
             if ids.ip.is_some() {
                 e.current_ip.clone_from(&ids.ip);
             }
-            e.stored.last_seen = Some(now_ms());
+            e.stored.last_seen = Some(unix_ms().floor());
         }
     }
 
@@ -602,7 +596,10 @@ impl Shared {
     }
 
     pub async fn request(&self, line: String, within: Duration) -> Result<Value, String> {
-        self.0.request(&line, within).await
+        self.0
+            .request(&line, within)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     pub async fn wake(self, mac: String, protocol: Option<Protocol>) {
@@ -718,7 +715,7 @@ fn class_of(d: &Value) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config_file::tests::TempDir;
+    use crate::files::config_file::tests::TempDir;
 
     fn seen(bt: &str, wifi: &str, name: &str, wired: bool) -> Seen {
         let opt = |v: &str| (!v.is_empty()).then(|| v.to_string());

@@ -3,13 +3,12 @@
 // Additional terms: see NOTICE
 
 use std::fs;
-use std::io;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
+use livi_base::fs::{PRIVATE, write_atomic};
 use serde::{Deserialize, Serialize};
 
-use crate::crypto::{ed25519_public, random_bytes};
+use livi_crypto::{ed25519_public, random_bytes};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Identity {
@@ -33,19 +32,7 @@ struct Stored {
     pi: String,
 }
 
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-pub(crate) fn unhex(s: &str) -> Option<Vec<u8>> {
-    if !s.len().is_multiple_of(2) {
-        return None;
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
-        .collect()
-}
+pub(crate) use livi_base::hex::{decode as unhex, encode as hex};
 
 fn read(path: &Path) -> Option<Identity> {
     let stored: Stored = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
@@ -54,21 +41,6 @@ fn read(path: &Path) -> Option<Identity> {
         public: unhex(&stored.public)?.try_into().ok()?,
         pairing_id: stored.pi,
     })
-}
-
-pub(crate) fn write_private(path: &Path, data: &str) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    let _ = fs::remove_file(&tmp);
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)?;
-    io::Write::write_all(&mut file, data.as_bytes())?;
-    fs::rename(&tmp, path)
 }
 
 pub fn load_or_create(path: &Path) -> Identity {
@@ -87,7 +59,7 @@ pub fn load_or_create(path: &Path) -> Identity {
         pi: id.pairing_id.clone(),
     };
     let json = serde_json::to_string(&stored).expect("strings always serialize");
-    if let Err(e) = write_private(path, &json) {
+    if let Err(e) = write_atomic(path, &json, PRIVATE) {
         eprintln!("[cp] could not persist the identity: {e}");
     }
     id
@@ -110,15 +82,11 @@ fn as_mac(text: &str) -> Option<String> {
 }
 
 pub fn derived_accessory_id(pairing_id: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(pairing_id.as_bytes());
+    let digest = livi_crypto::sha256(&[pairing_id.as_bytes()]);
     let mut mac = [0u8; 6];
     mac.copy_from_slice(&digest[..6]);
     mac[0] = (mac[0] & 0xfc) | 0x02;
-    mac.iter()
-        .map(|b| format!("{b:02X}"))
-        .collect::<Vec<_>>()
-        .join(":")
+    livi_base::hex::mac(&mac)
 }
 
 pub fn accessory_id(
@@ -132,7 +100,7 @@ pub fn accessory_id(
     let id = hardware()
         .and_then(|m| as_mac(&m))
         .unwrap_or_else(|| derived_accessory_id(pairing_id));
-    match write_private(path, &format!("{id}\n")) {
+    match write_atomic(path, format!("{id}\n"), PRIVATE) {
         Ok(()) => println!("[cp] the accessory is {id} from now on"),
         Err(e) => eprintln!("[cp] could not keep the accessory id: {e}"),
     }

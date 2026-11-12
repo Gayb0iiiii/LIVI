@@ -1,18 +1,17 @@
 [package]
 name = "livi-aa"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 livi-aa-proto.workspace = true
-livi-host-proto.workspace = true
+livi-output-proto.workspace = true
 livi-session-io.workspace = true
 livi-wifi.workspace = true
-futures-util.workspace = true
 prost.workspace = true
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 rustls-pemfile = "2"
-rustls-pki-types = "1"
 serde_json.workspace = true
 socket2 = { workspace = true, features = ["all"] }
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "io-util", "net"] }
@@ -25,3 +24,6 @@ nusb-android = { workspace = true, features = ["tokio"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "net"] }
+
+[lints]
+workspace = true

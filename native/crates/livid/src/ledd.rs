@@ -20,8 +20,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use livi_wifid::hostapd;
-use livi_wifid::radio::{self, Radio};
+use livi_link_ap::hostapd;
+use livi_link_ap::radio::{self, Radio};
 
 const SPI_DEV: &str = "/dev/spidev1.0";
 const HOSTAPD_RETRY: Duration = Duration::from_secs(2);
@@ -354,6 +354,7 @@ impl Spi {
             .write(true)
             .open(SPI_DEV)?;
         let fd = file.as_raw_fd();
+        // SAFETY: fd is open for the calls and each value lives on the stack for its ioctl.
         unsafe {
             let mode: u8 = 0;
             check(libc::ioctl(fd, SPI_IOC_WR_MODE as _, &mode as *const u8))?;
@@ -458,6 +459,7 @@ fn livid_main() -> std::io::Result<()> {
 
     let _ = fs::write(PID_PATH, format!("{}\n", std::process::id()));
 
+    // SAFETY: on_sighup only stores to an atomic, SIG_IGN installs no handler code.
     unsafe {
         libc::signal(libc::SIGHUP, on_sighup as *const () as libc::sighandler_t);
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);

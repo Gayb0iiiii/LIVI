@@ -1,7 +1,8 @@
 [package]
 name = "livi-helperd"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "livi-helperd"
@@ -10,9 +11,12 @@ path = "src/main.rs"
 [dependencies]
 livi-core-proto.workspace = true
 livi-helper.workspace = true
-livi-runtime.workspace = true
+livi-helper-stack.workspace = true
 livi-wifi.workspace = true
 livi-link-host.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
 serde_json.workspace = true
 libc.workspace = true
+
+[lints]
+workspace = true

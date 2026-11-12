@@ -1,21 +1,26 @@
 [package]
 name = "livid"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "livid"
 path = "src/main.rs"
 
 [dependencies]
+livi-base.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 livi-mdns.workspace = true
-livi-wifid.workspace = true
+livi-link-ap.workspace = true
 livi-web.workspace = true
-livi-btd.workspace = true
+livi-link-hci.workspace = true
 livi-net.workspace = true
 iap2-mfi.workspace = true
 libc.workspace = true
 [target.'cfg(all(target_os = "linux", not(target_arch = "riscv32")))'.dependencies]
 imx6ul-uboot.workspace = true
+
+[lints]
+workspace = true

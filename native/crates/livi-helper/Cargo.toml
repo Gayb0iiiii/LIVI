@@ -1,12 +1,14 @@
 [package]
 name = "livi-helper"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 livi-aa.workspace = true
+livi-base.workspace = true
 livi-core-proto.workspace = true
-livi-runtime.workspace = true
+livi-helper-stack.workspace = true
 livi-link-host.workspace = true
 livi-net.workspace = true
 livi-wifi.workspace = true
@@ -14,7 +16,6 @@ iap2-link.workspace = true
 iap2-mfi = { workspace = true, features = ["files"] }
 iap2-usbmux.workspace = true
 iap2-wired.workspace = true
-serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
@@ -23,3 +24,6 @@ livi-hfp.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 livi-mdns.workspace = true
+
+[lints]
+workspace = true

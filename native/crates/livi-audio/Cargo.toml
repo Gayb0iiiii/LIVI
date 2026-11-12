@@ -1,14 +1,19 @@
 [package]
 name = "livi-audio"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 gstreamer = { workspace = true, features = ["v1_24"] }
 gstreamer-app = { workspace = true, features = ["v1_24"] }
-gstreamer-audio = { version = "0.25", features = ["v1_24"] }
-gstreamer-controller = "0.25"
+gstreamer-audio = { workspace = true, features = ["v1_24"] }
+gstreamer-controller.workspace = true
 libc.workspace = true
+livi-base.workspace = true
 livi-crypto.workspace = true
-livi-host-proto.workspace = true
+livi-output-proto.workspace = true
 socket2.workspace = true
+
+[lints]
+workspace = true

@@ -11,12 +11,12 @@ use std::time::Duration;
 
 use livi_bt_host::sdp::{self, Service};
 use livi_bt_host::{Call, Config, Inbox, Incoming, Notice, Stack, hci};
-use livi_runtime::bringup::OnCable;
-use livi_runtime::hfp::Hfp;
-use livi_runtime::livi_sock::Broadcaster;
-use livi_runtime::reconnect::{self, Link, PING_TIMEOUT, Paging};
-use livi_runtime::sco::ScoSink;
-use livi_runtime::state::HelperState;
+use livi_helper_stack::bringup::OnCable;
+use livi_helper_stack::hfp::Hfp;
+use livi_helper_stack::livi_sock::Broadcaster;
+use livi_helper_stack::reconnect::{self, Link, PING_TIMEOUT, Paging};
+use livi_helper_stack::sco::ScoSink;
+use livi_helper_stack::state::HelperState;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -86,7 +86,7 @@ fn open(name: String, keys: PathBuf) -> Result<(Stack, Inbox), String> {
     let tunnel = livi_net::connect((host.as_str(), livi_net::port::HCI), CONNECT_TIMEOUT)
         .map_err(|e| format!("the dongle's controller: {e}"))?;
     let _ = tunnel.set_nodelay(true);
-    Stack::start(tunnel, Config { name, keys })
+    Stack::start(tunnel, Config { name, keys }).map_err(|e| e.to_string())
 }
 
 pub async fn run(
@@ -96,7 +96,7 @@ pub async fn run(
     state: Arc<HelperState>,
     radio: Radio,
 ) {
-    let mic = match livi_runtime::sco::mic_socket(&radio.mic) {
+    let mic = match livi_helper_stack::sco::mic_socket(&radio.mic) {
         Ok(mic) => Arc::new(mic),
         Err(e) => {
             eprintln!("[sco] mic socket failed: {e}");
@@ -211,7 +211,7 @@ fn answer(call: Call, profiles: &Profiles, mic: &Arc<UnixListener>) {
         profiles.sco_sink.clone(),
         mic.clone(),
     );
-    std::thread::spawn(move || livi_runtime::sco::call(&events, &link, &mic, &sink));
+    std::thread::spawn(move || livi_helper_stack::sco::call(&events, &link, &mic, &sink));
 }
 
 fn parse_uuid(text: &str) -> Option<[u8; 16]> {

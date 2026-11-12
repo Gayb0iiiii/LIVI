@@ -1,11 +1,16 @@
 [package]
 name = "livi-session-io"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
+livi-base.workspace = true
+futures-util.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "io-util", "net"] }
+thiserror.workspace = true
+tokio-util = { workspace = true }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 nusb = { workspace = true, features = ["tokio"] }
@@ -13,4 +18,5 @@ nusb = { workspace = true, features = ["tokio"] }
 [target.'cfg(target_os = "android")'.dependencies]
 nusb-android = { workspace = true, features = ["tokio"] }
 
-[dev-dependencies]
+[lints]
+workspace = true
