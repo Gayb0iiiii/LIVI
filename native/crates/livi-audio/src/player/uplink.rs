@@ -7,6 +7,7 @@ use gstreamer_app as gst_app;
 
 use crate::uplink::{Counters, RTP_HEADER_LEN, UplinkCodec, seal_packet, to_wire_pcm};
 use gst::prelude::*;
+use livi_crypto::ChaCha;
 use std::net::{IpAddr, SocketAddr, SocketAddrV6, UdpSocket};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -135,6 +136,7 @@ impl Uplink {
         let samples = cfg.samples_per_packet();
         let frame_bytes = (samples * u32::from(cfg.channels) * 2) as usize;
         let state = Mutex::new((Counters::default(), Vec::<u8>::new()));
+        let key = ChaCha::new(&cfg.key);
 
         sink.set_callbacks(
             gst_app::AppSinkCallbacks::builder()
@@ -156,25 +158,25 @@ impl Uplink {
                     match cfg.codec {
                         UplinkCodec::Opus => {
                             let frame = map.get(RTP_HEADER_LEN..).unwrap_or(&map);
-                            if let Some(pkt) =
-                                seal_packet(&cfg.key, cfg.payload_type, counters, frame, samples)
-                            {
-                                send(&pkt);
-                            }
+                            send(&seal_packet(
+                                &key,
+                                cfg.payload_type,
+                                counters,
+                                frame,
+                                samples,
+                            ));
                         }
                         UplinkCodec::Pcm => {
                             pending.extend_from_slice(&map);
                             while pending.len() >= frame_bytes {
                                 let frame: Vec<u8> = pending.drain(..frame_bytes).collect();
-                                if let Some(pkt) = seal_packet(
-                                    &cfg.key,
+                                send(&seal_packet(
+                                    &key,
                                     cfg.payload_type,
                                     counters,
                                     &to_wire_pcm(&frame),
                                     samples,
-                                ) {
-                                    send(&pkt);
-                                }
+                                ));
                             }
                         }
                     }
@@ -314,7 +316,8 @@ impl SocketTap {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as u64)
                 .unwrap_or(0);
-            let record = livi_host_proto::feed::encode(livi_host_proto::feed::KIND_MIC, 0, ts, pcm);
+            let record =
+                livi_output_proto::feed::encode(livi_output_proto::feed::KIND_MIC, 0, ts, pcm);
             if std::io::Write::write_all(&mut sock, &record).is_err() {
                 eprintln!("[mic:{tag}] the listener is gone");
                 broken = true;

@@ -16,7 +16,7 @@ LIVI_GST_DEBUG=1 ./LIVI*.AppImage
   settings, and starts the other processes.
 - **UI** is the `LIVI` window (Slint). On Linux core starts it, on macOS it starts
   core. It talks to core over a unix socket.
-- **gst-host** is a standalone native binary that runs the GStreamer video
+- **livi-output** is a standalone native binary that runs the GStreamer video
   pipeline. Core spawns it and talks to it over a unix socket.
 - **livi-compositor** is LIVI's own Wayland compositor on Linux. Core spawns it.
 - **helper** is `livi-helperd`, a native binary core runs as root. It sets up
@@ -27,8 +27,8 @@ LIVI_GST_DEBUG=1 ./LIVI*.AppImage
 - **stdout / stderr**: everything is printed to the console, timestamped. When LIVI
   is started from the autostart entry, the output is redirected to `LIVI.log` next
   to the AppImage.
-- **gst-host crash backtrace**: on a pipeline crash the child writes
-  `livi-gst-host-crash.log` next to the AppImage (or the working directory), and
+- **livi-output crash backtrace**: on a pipeline crash the child writes
+  `livi-output-crash.log` next to the AppImage (or the working directory), and
   core prints it as well.
 
 ## Debug flags
@@ -47,13 +47,13 @@ LIVI_GST_DEBUG=1 ./LIVI*.AppImage
 | `LIVI_GST_DEBUG=1`          | GStreamer debug logging with Pi-tuned categories (`v4l2codecs-decoder:6,v4l2codecs-h265dec:6,waylandsink:5,wl_dmabuf:6`). Any other value is used verbatim as the GStreamer debug string, for example `LIVI_GST_DEBUG="waylandsink:6"` or `LIVI_GST_DEBUG="*:5"`. |
 | `LIVI_GST_SWDEC=1`          | Force software decoding (avdec_*), bypassing the hardware decoder. Use it to tell a broken hardware decoder apart from a broken stream.                                                                                                                           |
 | `LIVI_GST_SINK=<element>`   | Override the video sink (default `waylandsink` on Linux).                                                                                                                                                                                                         |
-| `LIVI_GST_PRELOAD=<lib.so>` | LD_PRELOAD a library into the gst-host child only.                                                                                                                                                                                                                |
+| `LIVI_GST_PRELOAD=<lib.so>` | LD_PRELOAD a library into the livi-output child only.                                                                                                                                                                                                             |
 
 ### Compositor and Wayland
 
 | Flag                   | Effect                                                                                  |
 | ---------------------- | --------------------------------------------------------------------------------------- |
-| `LIVI_WLR_DEBUG=1`     | Raise the nested wlroots compositor log level to `WLR_DEBUG`.                           |
+| `LIVI_WLR_DEBUG=1`     | Raise the compositor log level to debug.                                                |
 | `LIVI_DEBUG_BG=1`      | Paint a magenta debug background in the compositor, to see the layout and video planes. |
 | `LIVI_NO_COMPOSITOR=1` | Start without the nested compositor.                                                    |
 
@@ -71,10 +71,9 @@ LIVI_GST_DEBUG=1 ./LIVI*.AppImage
 
 ### CarPlay, Bluetooth and Wi-Fi helper
 
-| Flag               | Effect                                                          |
-| ------------------ | --------------------------------------------------------------- |
-| `LIVI_CP_DEBUG=1`  | Verbose CarPlay and helper logging (also enabled by `DEBUG=1`). |
-| `LIVI_CP_SYSLOG=1` | Tap the CarPlay helper output into syslog.                      |
+| Flag              | Effect                                                          |
+| ----------------- | --------------------------------------------------------------- |
+| `LIVI_CP_DEBUG=1` | Verbose CarPlay and helper logging (also enabled by `DEBUG=1`). |
 
 ## Common workflows
 

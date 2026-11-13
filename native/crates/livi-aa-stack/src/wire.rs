@@ -172,11 +172,6 @@ pub fn has_field(buf: &[u8], field: u32) -> bool {
     decode_fields(buf).any(|f| f.field == field)
 }
 
-pub fn round_half_up(x: f64) -> f64 {
-    let floor = x.floor();
-    if x - floor >= 0.5 { floor + 1.0 } else { floor }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,13 +247,5 @@ mod tests {
         );
         assert!(has_field(&msg, 3));
         assert!(!has_field(&msg, 5));
-    }
-
-    #[test]
-    fn halves_round_up() {
-        assert_eq!(round_half_up(2.5), 3.0);
-        assert_eq!(round_half_up(-2.5), -2.0);
-        assert_eq!(round_half_up(-2.51), -3.0);
-        assert_eq!(round_half_up(0.49999999999999994), 0.0);
     }
 }

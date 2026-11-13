@@ -1,6 +1,10 @@
 [package]
 name = "iap2-link"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
+
+[lints]
+workspace = true

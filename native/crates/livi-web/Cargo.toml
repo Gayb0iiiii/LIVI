@@ -1,16 +1,17 @@
 [package]
 name = "livi-web"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
-
-[lib]
-name = "livi_web"
-path = "src/lib.rs"
+license.workspace = true
 
 [dependencies]
+livi-base.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 livi-wifi.workspace = true
-livi-wifid.workspace = true
+livi-link-ap.workspace = true
 livi-net.workspace = true
 libc.workspace = true
+
+[lints]
+workspace = true

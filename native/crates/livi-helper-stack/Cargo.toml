@@ -1,0 +1,37 @@
+[package]
+name = "livi-helper-stack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+livi-base.workspace = true
+livi-wifi.workspace = true
+livi-core-proto.workspace = true
+livi-output-proto.workspace = true
+iap2-csm.workspace = true
+iap2-link.workspace = true
+iap2-mfi.workspace = true
+tokio = { workspace = true, features = [
+  "rt",
+  "rt-multi-thread",
+  "macros",
+  "time",
+  "sync",
+  "io-util",
+  "net",
+  "process",
+] }
+libc.workspace = true
+base64.workspace = true
+serde_json.workspace = true
+socket2 = { workspace = true, features = ["all"] }
+zbus = { workspace = true, features = ["tokio", "service"] }
+livi-hfp.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "test-util"] }
+
+[lints]
+workspace = true

@@ -15,12 +15,12 @@ use iap2_usbmux::{MuxRegistry, find_iphones};
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use iap2_wired::open_carkit;
 use livi_core_proto::helper_events::{DeviceSource, HelperEvent, HelperKind};
-use livi_runtime::bringup::{CpConfig, run_accessory};
-use livi_runtime::driver::spawn_link_stream;
-use livi_runtime::ident::Identity;
-use livi_runtime::livi_sock::{Broadcaster, SharedTag, pump_artwork, pump_events_for};
-use livi_runtime::mfi_async::SharedCoprocessor;
-use livi_runtime::state::HelperState;
+use livi_helper_stack::bringup::{CpConfig, run_accessory};
+use livi_helper_stack::driver::spawn_link_stream;
+use livi_helper_stack::ident::Identity;
+use livi_helper_stack::livi_sock::{Broadcaster, SharedTag, pump_artwork, pump_events_for};
+use livi_helper_stack::mfi_async::SharedCoprocessor;
+use livi_helper_stack::state::HelperState;
 
 use crate::link::LinkPresence;
 use crate::short;
@@ -45,11 +45,14 @@ pub async fn watch(wired: Wired) {
     let registry = Arc::new(MuxRegistry::default());
     let mut failed: HashMap<String, u32> = HashMap::new();
     let mut cancels: HashMap<String, Arc<Notify>> = HashMap::new();
+    let mut seen: Vec<String> = Vec::new();
+    let rescan = Arc::new(Notify::new());
 
     loop {
         tokio::select! {
             _ = tokio::time::sleep(SCAN_INTERVAL) => {}
             _ = wired.link.changed().notified() => {}
+            _ = rescan.notified() => {}
         }
 
         let present: Vec<String> = tokio::task::spawn_blocking(find_iphones)
@@ -59,7 +62,7 @@ pub async fn watch(wired: Wired) {
             .map(|d| d.serial)
             .collect();
         failed.retain(|serial, _| present.contains(serial));
-        for serial in registry.serials() {
+        for serial in std::mem::replace(&mut seen, present.clone()) {
             if !present.contains(&serial) {
                 println!("[wired] {} unplugged", short(&serial));
                 if let Some(c) = cancels.remove(&serial) {
@@ -81,11 +84,7 @@ pub async fn watch(wired: Wired) {
             if failed.get(&serial).is_some_and(|n| *n >= GIVE_UP_ATTEMPTS) {
                 continue;
             }
-            let ensured = {
-                let (registry, serial) = (registry.clone(), serial.clone());
-                tokio::task::spawn_blocking(move || registry.ensure(&serial)).await
-            };
-            let dev = match ensured.unwrap_or_else(|e| Err(e.to_string())) {
+            let dev = match registry.ensure(&serial).await {
                 Ok(dev) => {
                     failed.remove(&serial);
                     dev
@@ -109,7 +108,7 @@ pub async fn watch(wired: Wired) {
             let ctx = wired.clone();
             let cancel = Arc::new(Notify::new());
             cancels.insert(serial.clone(), cancel.clone());
-            let registry = registry.clone();
+            let (registry, rescan) = (registry.clone(), rescan.clone());
             tokio::spawn(async move {
                 let ncm = {
                     let (serial, wired) = (dev.serial.clone(), ctx.clone());
@@ -138,6 +137,7 @@ pub async fn watch(wired: Wired) {
                     }
                 }
                 registry.remove(&serial);
+                rescan.notify_one();
             });
         }
     }
@@ -224,7 +224,7 @@ async fn find_usb_iface(udid: String, found: tokio::sync::watch::Sender<Option<S
                 let _ = found.send(Some(iface));
                 return;
             }
-            Err(e) => last = e,
+            Err(e) => last = e.to_string(),
         }
         tokio::time::sleep(USB_IFACE_POLL).await;
     }
@@ -355,7 +355,7 @@ async fn forward_starts(
     link: Arc<LinkPresence>,
     mut auth: SharedCoprocessor,
 ) {
-    use livi_runtime::AsyncAuth;
+    use livi_helper_stack::AsyncAuth;
     loop {
         asked.notified().await;
         if !link.is_present() {
@@ -404,8 +404,7 @@ pub(crate) fn announce(
     airplay: &Airplay,
     carplay: bool,
 ) -> Vec<livi_mdns::responder::Responder> {
-    use livi_core_proto::helper::MIRROR_NAME;
-    use livi_runtime::bonjour::AIRPLAY_SERVICE;
+    use livi_helper_stack::bonjour::AIRPLAY_SERVICE;
     let carplay = u16::try_from(cp.airplay_port)
         .ok()
         .filter(|&p| carplay && p != 0)
@@ -413,7 +412,7 @@ pub(crate) fn announce(
     let mirror = airplay
         .mirror
         .as_ref()
-        .map(|m| (MIRROR_NAME, m.port, m.txt.as_slice()));
+        .map(|m| (m.name.as_str(), m.port, m.txt.as_slice()));
     carplay
         .into_iter()
         .chain(mirror)
@@ -451,7 +450,7 @@ fn start_ncm_bridge(serial: &str, _wired: &Wired) -> LocalNcm {
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn bridged(serial: &str, bridge: Result<iap2_usbmux::NcmBridge, String>) -> LocalNcm {
+fn bridged(serial: &str, bridge: Result<iap2_usbmux::NcmBridge, iap2_usbmux::Error>) -> LocalNcm {
     match bridge {
         Ok(b) => LocalNcm::Local(b),
         Err(e) => {

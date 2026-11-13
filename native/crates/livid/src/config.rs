@@ -6,6 +6,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use livi_base::checksum::crc32;
+
 const MAGIC: &[u8; 4] = b"LVCF";
 const VERSION_V1: u16 = 1;
 const VERSION_V2: u16 = 2;
@@ -18,7 +20,7 @@ const TMPFS_LED: &str = "/tmp/livi/led.toml";
 const TMPFS_HOSTAPD: &str = "/tmp/livi/hostapd.conf.saved";
 const TMPFS_BT_KEYS: &str = "/tmp/livi/bt-keys";
 const TMPFS_UPDATE: &str = "/tmp/livi/update.conf";
-const TMPFS_RADIO: &str = livi_wifid::radio::PATH;
+const TMPFS_RADIO: &str = livi_link_ap::radio::PATH;
 const TMPFS_WLAN_MAC: &str = "/tmp/livi/wlan-mac";
 const DEFAULT_LED: &str = "/etc/livi/led.toml";
 const DEFAULT_HOSTAPD: &str = "/etc/hostapd.conf";
@@ -302,26 +304,11 @@ fn write_blob(blob: &[u8]) -> std::io::Result<()> {
         .open(mtd_dev()?)?;
     f.write_all(blob)?;
     f.sync_all()?;
+    // SAFETY: sync has no preconditions.
     unsafe {
         libc::sync();
     }
     Ok(())
-}
-
-fn crc32(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
-    for &b in data {
-        let mut byte = b as u32;
-        for _ in 0..8 {
-            let mix = (crc ^ byte) & 1;
-            crc >>= 1;
-            if mix != 0 {
-                crc ^= 0xEDB8_8320;
-            }
-            byte >>= 1;
-        }
-    }
-    !crc
 }
 
 fn io_err(msg: &str) -> std::io::Error {

@@ -18,7 +18,7 @@ concurrency:
 jobs:
   cla:
     name: Contributor License Agreement
-    if: github.event_name == 'pull_request_target' || (github.event.issue.pull_request && github.event.comment.user.type != 'Bot')
+    if: github.repository == 'f-io/LIVI' && (github.event_name == 'pull_request_target' || (github.event.issue.pull_request && github.event.comment.user.type != 'Bot'))
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ github.token }}

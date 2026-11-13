@@ -17,13 +17,14 @@ use tokio::sync::{Notify, mpsc};
 
 use crate::bplist::{self, Value, dict};
 use crate::control_cipher::ControlCipher;
-use crate::crypto::hkdf_sha512;
 use crate::helper_sock::HelperSock;
 use crate::identity::Identity;
+use crate::mfi4::session::TunnelError;
 use crate::pair_setup::PairSetup;
 use crate::pair_verify::PairVerify;
 use crate::pairings::Pairings;
 use crate::rtsp::{self, Request, Response};
+use crate::session_keys;
 use crate::timing_sync::TimingSync;
 use crate::{auth_setup, mfi4, net, tlv8};
 
@@ -165,6 +166,7 @@ pub trait AirplayMedia: Send + Sync {
     fn metadata(&self, id: u64, meta: AirplayMeta);
     fn volume(&self, db: f64);
     fn volume_db(&self) -> f64;
+    fn name(&self) -> String;
 }
 
 pub struct AirplayCtx {
@@ -173,7 +175,6 @@ pub struct AirplayCtx {
     pub pairings: Pairings,
     pub helper: HelperSock,
     pub device_id: String,
-    pub name: String,
     pub source_version: String,
     pub features: u64,
     pub txt: Vec<String>,
@@ -334,10 +335,8 @@ impl Conn {
                 && req.path.to_lowercase().ends_with("/pair-setup")
                 && let Some(k) = self.pair_setup.session_key()
             {
-                self.cipher = Some(ControlCipher::new(
-                    hkdf_sha512(&k, b"Control-Salt", b"Control-Write-Encryption-Key"),
-                    hkdf_sha512(&k, b"Control-Salt", b"Control-Read-Encryption-Key"),
-                ));
+                let (read, write) = session_keys::control(&k);
+                self.cipher = Some(ControlCipher::new(read, write));
             }
         }
         Ok(())
@@ -499,9 +498,9 @@ impl Conn {
             let mut check = |shown: &[u8]| {
                 let (expected, ours) = pair_verify
                     .transcript_proofs()
-                    .ok_or_else(|| "nothing to bind, pair-verify has not run".to_string())?;
+                    .ok_or(TunnelError::NotVerified)?;
                 if shown.get(..expected.len()) != Some(&expected[..]) {
-                    return Err("the phone's transcript proof does not match".to_string());
+                    return Err(TunnelError::ProofMismatch);
                 }
                 Ok(ours.to_vec())
             };
@@ -510,10 +509,12 @@ impl Conn {
                 .await;
             return octet(result);
         }
-        match auth_setup::handle(&req.body, &self.ctx.helper).await {
-            Ok(Some(body)) => octet(Ok(body)),
-            Ok(None) => status(400),
-            Err(e) => octet(Err(e)),
+        match auth_setup::handle(&req.body, &self.ctx.helper)
+            .await
+            .transpose()
+        {
+            Some(result) => octet(result),
+            None => status(400),
         }
     }
 
@@ -540,7 +541,7 @@ impl Conn {
             ("statusFlags", Value::Int(68)),
             ("model", Value::String("LIVI".into())),
             ("manufacturer", Value::String("LIVI".into())),
-            ("name", Value::String(ctx.name.clone())),
+            ("name", Value::String(ctx.media.name())),
             ("sourceVersion", Value::String(ctx.source_version.clone())),
             ("protocolVersion", Value::String("1.1".into())),
             ("pk", Value::Data(ctx.identity.public.to_vec())),
@@ -560,26 +561,21 @@ impl Conn {
     }
 
     fn event_keys(&self) -> Option<([u8; 32], [u8; 32])> {
-        let key = |k: &[u8]| {
-            (
-                hkdf_sha512(k, b"Events-Salt", b"Events-Read-Encryption-Key"),
-                hkdf_sha512(k, b"Events-Salt", b"Events-Write-Encryption-Key"),
-            )
-        };
         if self.transient {
-            return self.pair_setup.session_key().map(|k| key(&k));
+            return self
+                .pair_setup
+                .session_key()
+                .map(|k| session_keys::events(&k));
         }
-        self.pair_verify.shared_secret().map(|k| key(&k))
+        self.pair_verify
+            .shared_secret()
+            .map(|k| session_keys::events(&k))
     }
 
     fn stream_key(&self, sd: &Value) -> Option<[u8; 32]> {
         let k = self.pair_setup.session_key()?;
         let id = crate::stack::id_text(sd.get("streamConnectionID"));
-        Some(hkdf_sha512(
-            &k,
-            format!("DataStream-Salt{id}").as_bytes(),
-            b"DataStream-Output-Encryption-Key",
-        ))
+        Some(session_keys::data_stream(&k, &id, session_keys::DATA_OUT))
     }
 
     async fn setup(&mut self, req: &Request) -> Response {
@@ -1006,7 +1002,7 @@ fn pairing(body: Vec<u8>) -> Response {
     }
 }
 
-fn octet(result: Result<Vec<u8>, String>) -> Response {
+fn octet(result: Result<Vec<u8>, impl std::fmt::Display>) -> Response {
     match result {
         Ok(body) => Response {
             headers: vec![("Content-Type".into(), "application/octet-stream".into())],

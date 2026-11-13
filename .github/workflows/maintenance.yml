@@ -105,6 +105,7 @@ jobs:
 
   cla:
     name: Close pull requests without a CLA
+    if: github.repository == 'f-io/LIVI'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

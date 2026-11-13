@@ -1,0 +1,26 @@
+[package]
+name = "livi-output"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "livi-output"
+path = "src/main.rs"
+
+[dependencies]
+livi-audio.workspace = true
+livi-video.workspace = true
+livi-output-proto.workspace = true
+livi-screen-stream.workspace = true
+livi-video-player.workspace = true
+realfft = "3.5.1"
+glib.workspace = true
+glib-unix.workspace = true
+libc.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+livi-video-view.workspace = true
+
+[lints]
+workspace = true

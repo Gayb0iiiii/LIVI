@@ -28,12 +28,8 @@ on:
         description: "Build imx6ul_bcm4354 (armv7, static-musl, mainline kernel)"
         type: boolean
         default: true
-      x1600_aic8800d80:
-        description: "Build x1600_aic8800d80 (mipsel, musl, mainline kernel)"
-        type: boolean
-        default: false
       bindshells:
-        description: "Rebuild the provisioner bind-shells (armv7, riscv32, mipsel)"
+        description: "Rebuild the provisioner bind-shells (armv7, riscv32)"
         type: boolean
         default: false
       pages:
@@ -56,7 +52,9 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Setup Rust
-        run: rustup toolchain install
+        run: |
+          rustup update stable --no-self-update
+          rustup toolchain install
 
       - name: Restore cargo cache
         id: cargo
@@ -66,7 +64,7 @@ jobs:
 
       - name: cargo test shared and dongle crates
         working-directory: native
-        run: cargo test --release --locked -p iap2-mfi -p livi-wifi -p livi-btd -p livi-mdns -p livi-wifid
+        run: cargo test --release --locked -p iap2-mfi -p livi-wifi -p livi-link-hci -p livi-mdns -p livi-link-ap
 
       - name: Save cargo cache
         if: ${{ steps.cargo.outputs.hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
@@ -119,7 +117,6 @@ jobs:
           IMX6UL_RTL8822CS: ${{ inputs.imx6ul_rtl8822cs }}
           IMX6UL_RTL8822BS: ${{ inputs.imx6ul_rtl8822bs }}
           IMX6UL_BCM4354: ${{ inputs.imx6ul_bcm4354 }}
-          X1600: ${{ inputs.x1600_aic8800d80 }}
         run: |
           set -euo pipefail
           arr=()
@@ -129,7 +126,6 @@ jobs:
           [[ "$IMX6UL_RTL8822CS" == "true" ]] && arr+=('"imx6ul_rtl8822cs"')
           [[ "$IMX6UL_RTL8822BS" == "true" ]] && arr+=('"imx6ul_rtl8822bs"')
           [[ "$IMX6UL_BCM4354" == "true" ]] && arr+=('"imx6ul_bcm4354"')
-          [[ "$X1600" == "true" ]] && arr+=('"x1600_aic8800d80"')
           {
             printf 'matrix={"target":[%s]}\n' "$(IFS=,; echo "${arr[*]}")"
             printf 'any=%s\n' "$(IFS=,; echo "${arr[*]}")"
@@ -142,7 +138,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        arch: [armv7, riscv32, mipsel]
+        arch: [armv7, riscv32]
     env:
       ASSET_DIR: native/crates/livi-link-provision/assets/bindshell
     steps:
@@ -154,7 +150,7 @@ jobs:
           set -euo pipefail
           ZIG_VER=0.17.0
           ZIG_SHA=1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://ziglang.org/download/${ZIG_VER}/zig-x86_64-linux-${ZIG_VER}.tar.xz" -o /tmp/zig.tar.xz
+          curl -fsSL --connect-timeout 15 --retry 5 --retry-all-errors --retry-delay 5 "https://ziglang.org/download/${ZIG_VER}/zig-x86_64-linux-${ZIG_VER}.tar.xz" -o /tmp/zig.tar.xz
           echo "$ZIG_SHA  /tmp/zig.tar.xz" | sha256sum -c
           mkdir -p "$HOME/zig"
           tar -xJf /tmp/zig.tar.xz -C "$HOME/zig" --strip-components=1
@@ -204,12 +200,33 @@ jobs:
           echo "LIVI_VERSION=$LIVI_VERSION" >> "$GITHUB_ENV"
           echo "LIVI_BUILD=$LIVI_BUILD" >> "$GITHUB_ENV"
 
+      # Sources and firmware survive a failed run, the scripts take what still matches its hash.
+      - name: Restore downloads
+        id: downloads
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            build/${{ matrix.target }}/userspace/src/*.tar.*
+            build/${{ matrix.target }}/linux-*.tar.xz
+            build/${{ matrix.target }}/sha256sums.asc
+            build/${{ matrix.target }}/wireless-regdb-*.tar.xz
+            build/${{ matrix.target }}/firmware
+            build/${{ matrix.target }}/radxa-aic8800
+          key: livi-link-dl-${{ matrix.target }}-${{ hashFiles('scripts/livi-link/**') }}
+          restore-keys: livi-link-dl-${{ matrix.target }}-
+
       - name: Install Rust
         shell: bash
         run: |
           set -euo pipefail
-          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          init=https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init
+          curl -fsSL --connect-timeout 15 --retry 5 --retry-all-errors --retry-delay 5 "$init" -o /tmp/rustup-init
+          init_sha=$(curl -fsSL --connect-timeout 15 --retry 5 --retry-all-errors --retry-delay 5 "$init.sha256" | cut -d' ' -f1)
+          echo "$init_sha  /tmp/rustup-init" | sha256sum -c
+          chmod +x /tmp/rustup-init
+          /tmp/rustup-init -y --profile minimal --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" update stable --no-self-update
           "$HOME/.cargo/bin/rustup" toolchain install
           "$HOME/.cargo/bin/rustc" --version
 
@@ -222,7 +239,7 @@ jobs:
           TC_SHA=0d9ee91376785835a10b1631cfc9e4d6d61326c0512da774c012fdac53c2bc3a
           TC_DIR=$HOME/andes
           mkdir -p "$TC_DIR"
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$TC_URL" -o /tmp/andes.txz
+          curl -fsSL --connect-timeout 15 --retry 5 --retry-all-errors --retry-delay 5 "$TC_URL" -o /tmp/andes.txz
           echo "$TC_SHA  /tmp/andes.txz" | sha256sum -c
           tar -xJf /tmp/andes.txz -C "$TC_DIR"
           TC_BIN="$TC_DIR/nds32le-linux-glibc-v5d/bin"
@@ -266,7 +283,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$TOP"
-          bash "$BOARD_DIR/build-userspace.sh"
+          bash scripts/livi-link/common/build-userspace.sh "$BOARD_DIR"
           bash "$BOARD_DIR/build.sh"
           bash scripts/livi-link/common/build-rootfs.sh "$BOARD_DIR"
           bash scripts/livi-link/common/pack-bundle.sh "$BOARD_DIR"
@@ -307,7 +324,7 @@ jobs:
           set -euo pipefail
           if [[ $TARGET == imx6ul_* ]]; then export RADIO=${TARGET#imx6ul_}; fi
           mkdir -p "$TOP"
-          bash scripts/livi-link/arm/build-userspace.sh "$BOARD_DIR"
+          bash scripts/livi-link/common/build-userspace.sh "$BOARD_DIR"
           bash "$BOARD_DIR/build.sh"
           bash scripts/livi-link/common/build-rootfs.sh "$BOARD_DIR"
           bash scripts/livi-link/common/pack-bundle.sh "$BOARD_DIR"
@@ -318,63 +335,18 @@ jobs:
           source scripts/livi-link/version.sh
           livi_firmware_json "assets/livi-link/${{ matrix.target }}/$(basename "$BUNDLE")"
 
-      - name: Install mipsel cross toolchain (x1600)
-        if: matrix.target == 'x1600_aic8800d80'
-        shell: bash
-        run: |
-          set -euo pipefail
-          apt-get install -y --no-install-recommends \
-            squashfs-tools u-boot-tools bc bison flex libssl-dev libelf-dev bzip2 pkg-config xz-utils
-
-          TC_VER=2026.08-1
-          TC_SHA=e8517d51ba86699d5efaac62fc50fd9267dbdbc8b2cd3eb5b658db3582286778
-          TC_URL="https://toolchains.bootlin.com/downloads/releases/toolchains/mips32el/tarballs/mips32el--musl--stable-${TC_VER}.tar.xz"
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "$TC_URL" -o /tmp/mips-tc.tar.xz
-          echo "$TC_SHA  /tmp/mips-tc.tar.xz" | sha256sum -c
-          mkdir -p "$HOME/mips-tc"
-          tar -xJf /tmp/mips-tc.tar.xz -C "$HOME/mips-tc" --strip-components=1
-          cp "$HOME/mips-tc/lib/gcc/mipsel-buildroot-linux-musl/15.3.0/libgcc_eh.a" \
-             "$HOME/mips-tc/mipsel-buildroot-linux-musl/sysroot/lib/libunwind.a"
-          echo "$HOME/mips-tc/bin" >> "$GITHUB_PATH"
-          "$HOME/mips-tc/bin/mipsel-buildroot-linux-musl-gcc" --version | head -1
-
-      - name: Setup Rust nightly + rust-src (x1600)
-        if: matrix.target == 'x1600_aic8800d80'
-        shell: bash
-        run: |
-          set -euo pipefail
-          nightly=$(<scripts/livi-link/common/rust-nightly)
-          "$HOME/.cargo/bin/rustup" toolchain install "$nightly" --profile minimal --component rust-src
-          "$HOME/.cargo/bin/rustc" "+$nightly" --version
-
-      - name: Restore cargo cache (x1600)
-        if: matrix.target == 'x1600_aic8800d80'
-        id: cargo_x1600
-        uses: ./.github/actions/cargo-cache/restore
+      - name: Save downloads
+        if: always() && steps.downloads.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
         with:
-          name: livi-link-x1600
-          toolchain: scripts/livi-link/common/rust-nightly
-
-      - name: Build X1600 firmware bundle
-        if: matrix.target == 'x1600_aic8800d80'
-        shell: bash
-        env:
-          BOARD_DIR: scripts/livi-link/mips/x1600
-          TOP: ${{ github.workspace }}/build/x1600_aic8800d80
-          CROSS_COMPILE: mipsel-buildroot-linux-musl-
-        run: |
-          set -euo pipefail
-          mkdir -p "$TOP"
-          bash scripts/livi-link/mips/build-userspace.sh "$BOARD_DIR"
-          bash "$BOARD_DIR/build.sh"
-          bash scripts/livi-link/common/build-rootfs.sh "$BOARD_DIR"
-          bash scripts/livi-link/common/pack-bundle.sh "$BOARD_DIR"
-
-          BUNDLE=$(source "$BOARD_DIR/board.sh" && echo "$BUNDLE")
-          mkdir -p "assets/livi-link/x1600_aic8800d80"
-          cp "$BUNDLE" "assets/livi-link/x1600_aic8800d80/"
-          source scripts/livi-link/version.sh
-          livi_firmware_json "assets/livi-link/x1600_aic8800d80/$(basename "$BUNDLE")"
+          path: |
+            build/${{ matrix.target }}/userspace/src/*.tar.*
+            build/${{ matrix.target }}/linux-*.tar.xz
+            build/${{ matrix.target }}/sha256sums.asc
+            build/${{ matrix.target }}/wireless-regdb-*.tar.xz
+            build/${{ matrix.target }}/firmware
+            build/${{ matrix.target }}/radxa-aic8800
+          key: ${{ steps.downloads.outputs.cache-primary-key }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -384,10 +356,10 @@ jobs:
           retention-days: 30
 
       - name: Save cargo cache
-        if: ${{ (steps.cargo_v821b.outputs.key || steps.cargo_armv7.outputs.key || steps.cargo_x1600.outputs.key) != '' && (steps.cargo_v821b.outputs.hit || steps.cargo_armv7.outputs.hit || steps.cargo_x1600.outputs.hit) != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
+        if: ${{ (steps.cargo_v821b.outputs.key || steps.cargo_armv7.outputs.key) != '' && (steps.cargo_v821b.outputs.hit || steps.cargo_armv7.outputs.hit) != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
         uses: ./.github/actions/cargo-cache/save
         with:
-          key: ${{ steps.cargo_v821b.outputs.key || steps.cargo_armv7.outputs.key || steps.cargo_x1600.outputs.key }}
+          key: ${{ steps.cargo_v821b.outputs.key || steps.cargo_armv7.outputs.key }}
 
   commit:
     name: Commit updated assets
@@ -395,7 +367,7 @@ jobs:
     if: |
       always() &&
       needs.targets.result == 'success' &&
-      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      needs.build.result != 'cancelled' &&
       (needs.bindshell.result == 'success' || needs.bindshell.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
@@ -407,6 +379,7 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Download v821b_aic8800d80 artifact
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'v821b_aic8800d80')
         uses: actions/download-artifact@v8
         with:
@@ -414,6 +387,7 @@ jobs:
           path: assets/livi-link/v821b_aic8800d80
 
       - name: Download ax520_aic8800d80 artifact
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'ax520_aic8800d80')
         uses: actions/download-artifact@v8
         with:
@@ -421,6 +395,7 @@ jobs:
           path: assets/livi-link/ax520_aic8800d80
 
       - name: Download imx6ul_iw416 artifact
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'imx6ul_iw416')
         uses: actions/download-artifact@v8
         with:
@@ -428,6 +403,7 @@ jobs:
           path: assets/livi-link/imx6ul_iw416
 
       - name: Download imx6ul_rtl8822cs artifact
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'imx6ul_rtl8822cs')
         uses: actions/download-artifact@v8
         with:
@@ -435,6 +411,7 @@ jobs:
           path: assets/livi-link/imx6ul_rtl8822cs
 
       - name: Download imx6ul_rtl8822bs artifact
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'imx6ul_rtl8822bs')
         uses: actions/download-artifact@v8
         with:
@@ -442,18 +419,12 @@ jobs:
           path: assets/livi-link/imx6ul_rtl8822bs
 
       - name: Download imx6ul_bcm4354 artifact
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'imx6ul_bcm4354')
         uses: actions/download-artifact@v8
         with:
           name: imx6ul_bcm4354
           path: assets/livi-link/imx6ul_bcm4354
-
-      - name: Download x1600_aic8800d80 artifact
-        if: contains(needs.targets.outputs.any, 'x1600_aic8800d80')
-        uses: actions/download-artifact@v8
-        with:
-          name: x1600_aic8800d80
-          path: assets/livi-link/x1600_aic8800d80
 
       - name: Download bind-shell artifacts
         if: inputs.bindshells
@@ -591,7 +562,7 @@ jobs:
       needs.workspace-tests.result == 'success' &&
       needs.bundle-sanity.result == 'success' &&
       needs.targets.result == 'success' &&
-      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
+      needs.build.result != 'cancelled' &&
       (needs.bindshell.result == 'success' || needs.bindshell.result == 'skipped')
     runs-on: ${{ matrix.runner }}
     env:
@@ -619,6 +590,7 @@ jobs:
         run: sh scripts/assets.sh fetch livi-link
 
       - name: Take the v821b firmware bundle from this run
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'v821b_aic8800d80')
         uses: actions/download-artifact@v8
         with:
@@ -626,6 +598,7 @@ jobs:
           path: assets/livi-link/v821b_aic8800d80
 
       - name: Take the ax520 firmware bundle from this run
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'ax520_aic8800d80')
         uses: actions/download-artifact@v8
         with:
@@ -633,6 +606,7 @@ jobs:
           path: assets/livi-link/ax520_aic8800d80
 
       - name: Take the imx6ul_iw416 firmware bundle from this run
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'imx6ul_iw416')
         uses: actions/download-artifact@v8
         with:
@@ -640,6 +614,7 @@ jobs:
           path: assets/livi-link/imx6ul_iw416
 
       - name: Take the imx6ul_rtl8822cs firmware bundle from this run
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'imx6ul_rtl8822cs')
         uses: actions/download-artifact@v8
         with:
@@ -647,6 +622,7 @@ jobs:
           path: assets/livi-link/imx6ul_rtl8822cs
 
       - name: Take the imx6ul_rtl8822bs firmware bundle from this run
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'imx6ul_rtl8822bs')
         uses: actions/download-artifact@v8
         with:
@@ -654,6 +630,7 @@ jobs:
           path: assets/livi-link/imx6ul_rtl8822bs
 
       - name: Take the imx6ul_bcm4354 firmware bundle from this run
+        continue-on-error: true
         if: contains(needs.targets.outputs.any, 'imx6ul_bcm4354')
         uses: actions/download-artifact@v8
         with:
@@ -673,6 +650,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rustup update stable --no-self-update
           rustup toolchain install
           if [[ -n "$TARGET" ]]; then rustup target add "$TARGET"; fi
           rustc --version

@@ -1,0 +1,190 @@
+// SPDX-FileCopyrightText: 2025-2026 Lasse Heitgres
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Additional terms: see NOTICE
+
+use core::ffi::{c_char, c_int, c_void};
+use std::cell::RefCell;
+use std::ffi::CString;
+use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::{Arc, Mutex};
+
+use glib::{ControlFlow, IOCondition, SourceId};
+
+use crate::gst::Gst;
+use crate::{Host, Wire};
+
+const STATS_SECONDS: u32 = 5;
+const VISUALIZER_INTERVAL_MS: u64 = 20;
+const URL_STATUS_INTERVAL_MS: u64 = 500;
+const CHUNK: usize = 65536;
+
+struct SocketWire {
+    sock: Arc<UnixStream>,
+    write: Mutex<()>,
+}
+
+impl Wire for SocketWire {
+    fn reply(&self, op: u8, id: u32, rest: &[u8]) {
+        let _guard = self.write.lock().unwrap_or_else(|e| e.into_inner());
+        let mut sock: &UnixStream = &self.sock;
+        let _ = sock.write_all(&livi_output_proto::encode_reply(op, id, rest));
+    }
+}
+
+pub fn run(sock_path: &str, crash_log: &str) {
+    glib::set_prgname(Some("livi-video"));
+    livi_video_player::ensure_init();
+    arm_crash_handler(crash_log);
+
+    let Ok(sock) = UnixStream::connect(sock_path) else {
+        eprintln!("[output] connect to {sock_path} failed");
+        std::process::exit(1);
+    };
+    let _sources = attach(sock, || std::process::exit(0));
+    glib::MainLoop::new(None, false).run();
+}
+
+pub fn serve(sock_path: &Path) {
+    livi_video_player::ensure_init();
+    let sock = match UnixStream::connect(sock_path) {
+        Ok(sock) => sock,
+        Err(e) => {
+            eprintln!("[output] connect to {} failed: {e}", sock_path.display());
+            return;
+        }
+    };
+    let main = glib::MainLoop::new(None, false);
+    let quit = main.clone();
+    let sources = attach(sock, move || quit.quit());
+    main.run();
+    for source in sources {
+        source.remove();
+    }
+}
+
+fn attach(sock: UnixStream, hung_up: impl Fn() + 'static) -> Vec<SourceId> {
+    let sock = Arc::new(sock);
+    let wire = Arc::new(SocketWire {
+        sock: sock.clone(),
+        write: Mutex::new(()),
+    });
+    let host = Rc::new(RefCell::new(Host::new(Gst, wire)));
+
+    let fd = sock.as_raw_fd();
+    let reading = host.clone();
+    let mut sources = vec![glib_unix::unix_fd_add_local(
+        fd,
+        IOCondition::IN | IOCondition::HUP | IOCondition::ERR,
+        move |_, cond| {
+            if cond.intersects(IOCondition::HUP | IOCondition::ERR) {
+                hung_up();
+                return ControlFlow::Continue;
+            }
+            let mut chunk = [0u8; CHUNK];
+            let mut from: &UnixStream = &sock;
+            match from.read(&mut chunk) {
+                Ok(0) | Err(_) => hung_up(),
+                Ok(n) => {
+                    let fed = reading.borrow_mut().feed(&chunk[..n]);
+                    if let Err(e) = fed {
+                        eprintln!("[output] {e}");
+                        hung_up();
+                    }
+                }
+            }
+            ControlFlow::Continue
+        },
+    )];
+
+    let visualizer_host = host.clone();
+    sources.push(glib::timeout_add_local(
+        std::time::Duration::from_millis(VISUALIZER_INTERVAL_MS),
+        move || {
+            visualizer_host.borrow_mut().pump_visualizer();
+            ControlFlow::Continue
+        },
+    ));
+
+    let status_host = host.clone();
+    sources.push(glib::timeout_add_local(
+        std::time::Duration::from_millis(URL_STATUS_INTERVAL_MS),
+        move || {
+            status_host.borrow().pump_url_status();
+            status_host.borrow().pump_audio_delays();
+            ControlFlow::Continue
+        },
+    ));
+
+    sources.push(glib::timeout_add_seconds_local(STATS_SECONDS, move || {
+        for line in host.borrow().take_stats() {
+            eprintln!("{line}");
+        }
+        ControlFlow::Continue
+    }));
+    sources
+}
+
+static CRASH_PATH: AtomicPtr<c_char> = AtomicPtr::new(core::ptr::null_mut());
+
+const SIG_DFL: usize = 0;
+
+unsafe extern "C" {
+    fn backtrace(buffer: *mut *mut c_void, size: c_int) -> c_int;
+    fn backtrace_symbols_fd(buffer: *const *mut c_void, size: c_int, fd: c_int);
+    fn signal(sig: c_int, handler: usize) -> usize;
+}
+
+extern "C" fn on_crash(sig: c_int) {
+    const HEADER: &[u8] = b"\n=== livi-output CRASH backtrace ===\n";
+    let mut frames = [core::ptr::null_mut::<c_void>(); 64];
+    // SAFETY: frames is writable for frames.len() pointers.
+    let depth = unsafe { backtrace(frames.as_mut_ptr(), frames.len() as c_int) };
+
+    // SAFETY: HEADER is valid for its length and backtrace filled depth entries of frames.
+    let dump = |fd: c_int| unsafe {
+        let _ = libc::write(fd, HEADER.as_ptr().cast(), HEADER.len());
+        backtrace_symbols_fd(frames.as_ptr(), depth, fd);
+    };
+    dump(libc::STDERR_FILENO);
+
+    let path = CRASH_PATH.load(Ordering::Relaxed);
+    if !path.is_null() {
+        // SAFETY: path is the leaked CString from arm_crash_handler, never freed.
+        let fd = unsafe {
+            libc::open(
+                path,
+                libc::O_CREAT | libc::O_WRONLY | libc::O_TRUNC,
+                0o644 as c_int,
+            )
+        };
+        if fd >= 0 {
+            dump(fd);
+            // SAFETY: fd was opened above and is closed once.
+            unsafe { libc::close(fd) };
+        }
+    }
+
+    // SAFETY: restores the default action and re-raises, both take plain ints.
+    unsafe {
+        signal(sig, SIG_DFL);
+        libc::raise(sig);
+    }
+}
+
+fn arm_crash_handler(crash_log: &str) {
+    if !crash_log.is_empty()
+        && let Ok(path) = CString::new(crash_log)
+    {
+        CRASH_PATH.store(path.into_raw(), Ordering::Relaxed);
+    }
+    // SAFETY: on_crash is an extern "C" fn(c_int), the handler type signal expects.
+    unsafe {
+        signal(libc::SIGSEGV, on_crash as *const () as usize);
+        signal(libc::SIGABRT, on_crash as *const () as usize);
+    }
+}

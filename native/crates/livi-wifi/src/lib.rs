@@ -6,16 +6,18 @@
 
 pub mod ap_config;
 pub mod band;
+mod error;
 pub mod radio;
 pub mod security;
 
 pub use band::{Band, Channel};
+pub use error::Error;
 pub use radio::{BandOffer, Radio, radio};
 pub use security::Security;
 
 #[cfg(not(target_os = "linux"))]
-pub fn listing() -> Result<String, String> {
-    Err("the channel list needs linux".into())
+pub fn listing() -> Result<String, Error> {
+    Err(Error::NeedsLinux)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +128,7 @@ pub fn run() -> ExitCode {
 }
 
 #[cfg(target_os = "linux")]
-pub fn listing() -> Result<String, String> {
+pub fn listing() -> Result<String, Error> {
     let fd = open()?;
     let family = family_id(&fd)?;
     let mut out = String::new();
@@ -148,7 +150,8 @@ pub fn listing() -> Result<String, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn open() -> Result<OwnedFd, String> {
+fn open() -> Result<OwnedFd, Error> {
+    // SAFETY: socket takes plain ints.
     let raw = unsafe {
         libc::socket(
             libc::AF_NETLINK,
@@ -157,14 +160,14 @@ fn open() -> Result<OwnedFd, String> {
         )
     };
     if raw < 0 {
-        return Err(format!(
-            "netlink socket: {}",
-            std::io::Error::last_os_error()
-        ));
+        return Err(netlink("socket"));
     }
+    // SAFETY: raw is a fresh socket fd owned by nothing else.
     let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+    // SAFETY: an all-zero sockaddr_nl is valid, it is plain integers.
     let mut local: libc::sockaddr_nl = unsafe { std::mem::zeroed() };
     local.nl_family = libc::AF_NETLINK as u16;
+    // SAFETY: fd is open for the call and local is a sockaddr_nl of the size passed.
     let bound = unsafe {
         libc::bind(
             fd.as_raw_fd(),
@@ -173,12 +176,13 @@ fn open() -> Result<OwnedFd, String> {
         )
     };
     if bound < 0 {
-        return Err(format!("netlink bind: {}", std::io::Error::last_os_error()));
+        return Err(netlink("bind"));
     }
     let timeout = libc::timeval {
         tv_sec: 3,
         tv_usec: 0,
     };
+    // SAFETY: fd is open for the call and timeout is a timeval of the size passed.
     unsafe {
         libc::setsockopt(
             fd.as_raw_fd(),
@@ -192,7 +196,7 @@ fn open() -> Result<OwnedFd, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn family_id(fd: &OwnedFd) -> Result<u16, String> {
+fn family_id(fd: &OwnedFd) -> Result<u16, Error> {
     let name = attr(CTRL_ATTR_FAMILY_NAME, b"nl80211\0");
     let request = message(GENL_ID_CTRL, CTRL_CMD_GETFAMILY, NLM_F_ACK, &name);
     for payload in call(fd, &request)? {
@@ -202,7 +206,7 @@ fn family_id(fd: &OwnedFd) -> Result<u16, String> {
             }
         }
     }
-    Err("nl80211 is not registered with generic netlink".into())
+    Err(Error::NoNl80211)
 }
 
 #[cfg(target_os = "linux")]
@@ -255,6 +259,7 @@ pub fn stations(iface: &str) -> Stations {
     let Ok(name) = std::ffi::CString::new(iface) else {
         return Stations::default();
     };
+    // SAFETY: name is a nul-terminated C string that outlives the call.
     let index = unsafe { libc::if_nametoindex(name.as_ptr()) };
     if index == 0 {
         return Stations::default();
@@ -325,7 +330,7 @@ pub fn regulatory_country() -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn country(fd: &OwnedFd, family: u16) -> Result<String, String> {
+fn country(fd: &OwnedFd, family: u16) -> Result<String, Error> {
     let request = message(family, NL80211_CMD_GET_REG, NLM_F_ACK, &[]);
     for payload in call(fd, &request)? {
         for (kind, value) in Attrs(&payload[..]) {
@@ -334,7 +339,7 @@ fn country(fd: &OwnedFd, family: u16) -> Result<String, String> {
             }
         }
     }
-    Err("no regulatory domain".into())
+    Err(Error::NoRegulatoryDomain)
 }
 
 #[cfg(target_os = "linux")]
@@ -351,7 +356,7 @@ struct Frequency {
 }
 
 #[cfg(target_os = "linux")]
-fn radios(fd: &OwnedFd, family: u16) -> Result<Vec<Phy>, String> {
+fn radios(fd: &OwnedFd, family: u16) -> Result<Vec<Phy>, Error> {
     let split = attr(ATTR_SPLIT_WIPHY_DUMP, &[]);
     let request = message(family, NL80211_CMD_GET_WIPHY, NLM_F_DUMP, &split);
     let mut radios: Vec<Phy> = Vec::new();
@@ -465,7 +470,16 @@ const fn align(n: usize) -> usize {
 }
 
 #[cfg(target_os = "linux")]
-fn call(fd: &OwnedFd, request: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+fn netlink(what: &'static str) -> Error {
+    Error::Netlink {
+        what,
+        source: std::io::Error::last_os_error(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn call(fd: &OwnedFd, request: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
+    // SAFETY: fd is open for the call and request is readable for request.len() bytes.
     let sent = unsafe {
         libc::send(
             fd.as_raw_fd(),
@@ -475,12 +489,13 @@ fn call(fd: &OwnedFd, request: &[u8]) -> Result<Vec<Vec<u8>>, String> {
         )
     };
     if sent < 0 {
-        return Err(format!("netlink send: {}", std::io::Error::last_os_error()));
+        return Err(netlink("send"));
     }
 
     let mut out = Vec::new();
     let mut buf = vec![0u8; 64 << 10];
     loop {
+        // SAFETY: fd is open for the call and buf is writable for buf.len() bytes.
         let got = unsafe {
             libc::recv(
                 fd.as_raw_fd(),
@@ -490,21 +505,21 @@ fn call(fd: &OwnedFd, request: &[u8]) -> Result<Vec<Vec<u8>>, String> {
             )
         };
         if got <= 0 {
-            return Err(format!("netlink recv: {}", std::io::Error::last_os_error()));
+            return Err(netlink("recv"));
         }
         let mut rest = &buf[..got as usize];
         while rest.len() >= 16 {
             let len = u32::from_ne_bytes([rest[0], rest[1], rest[2], rest[3]]) as usize;
             let kind = u16::from_ne_bytes([rest[4], rest[5]]);
             if len < 16 || len > rest.len() {
-                return Err("truncated netlink message".into());
+                return Err(Error::Truncated);
             }
             match kind {
                 NLMSG_DONE => return Ok(out),
                 NLMSG_ERROR => {
                     let code = i32::from_ne_bytes([rest[16], rest[17], rest[18], rest[19]]);
                     if code != 0 {
-                        return Err(format!("netlink error {code}"));
+                        return Err(Error::Kernel(code));
                     }
                     return Ok(out);
                 }

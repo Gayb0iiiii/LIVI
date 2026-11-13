@@ -15,7 +15,8 @@ pub struct Status {
 }
 
 pub fn status(host: &str) -> Option<Status> {
-    ureq::get(&format!("http://{host}/api/status"))
+    crate::http()
+        .get(&format!("http://{host}/api/status"))
         .config()
         .timeout_global(Some(Duration::from_secs(2)))
         .build()
@@ -40,7 +41,8 @@ pub fn bundle(target: &str) -> Option<&'static [u8]> {
 }
 
 pub fn update(host: &str, bundle: &[u8]) -> Result<String, String> {
-    let mut reply = ureq::post(&format!("http://{host}/api/flash"))
+    let mut reply = crate::http()
+        .post(&format!("http://{host}/api/flash"))
         .header("Content-Type", "application/octet-stream")
         .config()
         .timeout_global(Some(Duration::from_secs(900)))
@@ -66,11 +68,7 @@ pub fn refused(error: &str) -> Option<u8> {
 
 pub fn without(bundle: &[u8], typ: u8) -> Result<Vec<u8>, String> {
     let images = super::lfwb::unpack(bundle)?;
-    let rest: Vec<(u8, &[u8])> = images
-        .iter()
-        .filter(|(t, _)| *t != typ)
-        .map(|(t, data)| (*t, data.as_slice()))
-        .collect();
+    let rest: Vec<(u8, &[u8])> = images.into_iter().filter(|(t, _)| *t != typ).collect();
     if rest.is_empty() {
         return Err(format!("the bundle holds nothing but image type {typ}"));
     }
@@ -124,8 +122,11 @@ mod tests {
     fn the_rest_of_a_bundle_goes_without_the_refused_type() {
         let bundle =
             crate::dongle::lfwb::pack(&[(2, b"kernel".as_slice()), (3, b"hsqs-rootfs".as_slice())]);
-        let rest = crate::dongle::lfwb::unpack(&without(&bundle, 2).unwrap()).unwrap();
-        assert_eq!(rest, vec![(3, b"hsqs-rootfs".to_vec())]);
+        let rest = without(&bundle, 2).unwrap();
+        assert_eq!(
+            crate::dongle::lfwb::unpack(&rest).unwrap(),
+            vec![(3, b"hsqs-rootfs".as_slice())]
+        );
         let only = crate::dongle::lfwb::pack(&[(2, b"kernel".as_slice())]);
         assert!(without(&only, 2).is_err());
     }

@@ -1,13 +1,16 @@
 [package]
 name = "livi-link-host"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
-futures-util.workspace = true
 libc.workspace = true
+livi-base.workspace = true
 livi-net.workspace = true
+livi-session-io.workspace = true
 livi-wifi.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "io-util", "net"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
@@ -19,3 +22,6 @@ nusb-android = { workspace = true, features = ["tokio"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "net", "test-util"] }
+
+[lints]
+workspace = true

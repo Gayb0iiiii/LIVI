@@ -39,7 +39,7 @@ use smithay::reexports::rustix::fs::OFlags;
 use smithay::utils::{DeviceFd, Point, SERIAL_COUNTER, Scale, Size, Transform};
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Stroke};
 
-use livi_host_proto::ctrl::TouchCal;
+use livi_output_proto::ctrl::TouchCal;
 
 use crate::render::LiviElement;
 use crate::state::LiviState;
@@ -160,7 +160,9 @@ fn start(
     let (device, notifier, fd) = open_device(&mut session, &seat)?;
 
     let gbm = GbmDevice::new(fd.clone())?;
+    // SAFETY: no other code in this process creates EGL displays, smithay tracks this one.
     let egl_display = unsafe { EGLDisplay::new(gbm.clone())? };
+    // SAFETY: the context was just created here and is current on no other thread.
     let renderer = unsafe { GlesRenderer::new(EGLContext::new(&egl_display)?)? };
     let formats = renderer.egl_context().dmabuf_render_formats().clone();
     let scanout = fd.dev_id().ok().map(|dev| (dev, plane_formats(&device)));

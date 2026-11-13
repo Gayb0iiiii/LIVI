@@ -6,6 +6,12 @@
 #        cla.sh stale
 set -eu
 : "${GITHUB_REPOSITORY:?}"
+# This agreement is administered by upstream, not by personal forks importing it.
+# Exit before recording signatures, changing statuses, or closing pull requests.
+if [ "$GITHUB_REPOSITORY" != "f-io/LIVI" ]; then
+  echo "Upstream CLA automation is not applicable to $GITHUB_REPOSITORY"
+  exit 0
+fi
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 STORE=${CLA_STORE:-${RUNNER_TEMP:-/tmp}/cla}
 BRANCH=version
