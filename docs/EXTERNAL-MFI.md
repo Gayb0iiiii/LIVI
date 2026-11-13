@@ -42,14 +42,25 @@ algorithm's exact input lengths and serialize access where its native provider
 requires it. Private keys remain on the device. No proprietary library, firmware,
 certificate, or identity is included in this change.
 
-Protocol availability is not authentication success. Real validation still needs
-the phone to accept the authentication exchange, followed by actual video, audio,
-touch, and reconnection tests. Direct stock logs and matching binary hashes identify
+Protocol availability is not authentication success. Validation must distinguish
+phone acceptance from display, audio, touch and reconnection. Direct stock logs and matching binary hashes identify
 `PATH_I2C=ly_iap` and Bluetooth callback state 3, traced to receipt of the phone's
 iAP2 authentication-success message. The later stock connection timed out.
-Subsequent AirPlay authentication, native library ABI/lifecycle in a wrapper, and
-any device-local bridge remain unverified. Its web page, Bluetooth pairing, and
-`05ac:12a8` USB enumeration alone do not establish authentication or projection.
+A later bounded stock observer trial verified normal selector interposition and
+restoration. A temporary device bridge then returned protocol-major 3 through the
+forwarding chain and restored normal stock, with cleanup verified. These metadata
+checks did not activate the host receiver or validate certificate/signature calls.
+
+A subsequent bounded LIVI host trial with a real iPhone attached recorded received
+iAP2 authentication success with this endpoint configured. The configured path does
+not fall back to another identity. The owner confirmed CarPlay display and touch;
+audio could not be tested, and reconnection and sustained operation remain unverified.
+The host trial ended with its planned restoration. Authentication-success markers
+are not a count of signing calls or reconnections. See the [trial evidence and
+acceptance table](AX520-STOCK-AUTH.md#phone-attached-livi-trial-2026-11-13).
+
+The adapter's web page, Bluetooth pairing, and `05ac:12a8` USB enumeration alone
+do not establish authentication or projection.
 
 The current wired receiver discovers Apple VID devices, then requires CarPlay USB
 configuration negotiation, usbmux, lockdown, and the carkit service. A stock
