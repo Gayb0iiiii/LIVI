@@ -1,0 +1,5 @@
+fixture
+fixture.c.generated
+__pycache__/
+artifacts/
+*.o

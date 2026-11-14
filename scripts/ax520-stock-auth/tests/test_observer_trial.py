@@ -30,6 +30,7 @@ class ObserverTrialTests(unittest.TestCase):
         cls.shim = cls.artifacts / "observer.so"
         cls.launcher = cls.artifacts / "observer-trial"
         cls.bridge_launcher = cls.artifacts / "bridge-trial"
+        cls.managed_launcher = cls.artifacts / "managed-trial"
         cls.interrupted_launcher = cls.artifacts / "interrupted-trial"
         common = ["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O1", "-g", "-pthread"]
         commands = [
@@ -49,6 +50,11 @@ class ObserverTrialTests(unittest.TestCase):
                       '-DAX520_TEST_STOCK="' + str(cls.stock) + '"',
                       '-DAX520_TEST_CONSOLE="' + str(cls.console) + '"',
                       str(HERE / "exec_interruption.c"), "-o", str(cls.interrupted_launcher)],
+            common + ["-DAX520_LAUNCHER_TEST", "-DAX520_LAUNCHER_ENABLE_BRIDGE",
+                      "-DAX520_LAUNCHER_ENABLE_MANAGED",
+                      '-DAX520_TEST_STOCK="' + str(cls.stock) + '"',
+                      '-DAX520_TEST_CONSOLE="' + str(cls.console) + '"',
+                      str(SOURCE / "observer_trial.c"), "-o", str(cls.managed_launcher)],
             common + [str(HERE / "task_visibility.c"), "-o", str(cls.artifacts / "task-visibility")],
             common + [str(HERE / "exiting_process.c"), "-o", str(cls.artifacts / "exiting-process")],
         ]
@@ -163,6 +169,69 @@ class ObserverTrialTests(unittest.TestCase):
     def remove_status(status):
         status.unlink(missing_ok=True)
         status.parent.rmdir()
+
+    def launch_managed(self, supervisor, worker, launcher=None):
+        return self.remember_watchdog(subprocess.run([
+            str(launcher or self.managed_launcher), "--managed-device-bridge",
+            str(supervisor), str(worker), str(self.shim)],
+            cwd="/", env=self.env, capture_output=True, text=True, timeout=4))
+
+    def managed_ready(self, result):
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fields = dict(field.split("=", 1) for field in result.stdout.strip().split())
+        status = Path(fields["status"])
+        deadline = time.monotonic() + 2
+        while "observer selected" not in status.read_text() and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertIn("observer selected", status.read_text())
+        return fields, status
+
+    def test_managed_bridge_outlasts_trial_window_and_restores_on_stop_once(self):
+        # A managed mode accidentally using the 500ms observer deadline fails:
+        # its real stock pair must still exist after more than twice that window.
+        supervisor, worker = self.original()
+        result = self.launch_managed(supervisor, worker)
+        fields, status = self.managed_ready(result)
+        time.sleep(1.1)
+        self.assertNotIn("result ", status.read_text())
+        starts = [row for row in self.events() if row[0] == "start"]
+        self.assertEqual([row[3] for row in starts], ["0", "1"])
+        os.kill(int(starts[-1][1]), 0)
+        os.kill(int(fields["watchdog"]), signal.SIGTERM)
+        _, finished = self.finish(result)
+        self.assertIn("result restored", finished)
+        self.assertEqual([row[3] for row in self.events() if row[0] == "start"], ["0", "1", "0"])
+        self.assertEqual([row[3:] for row in self.events() if row[0] == "settings"][-1],
+                         ["0", "0", "0", "0", "0", "0"])
+
+    def test_managed_supervisor_exit_cleans_worker_and_restores_once(self):
+        # A loop that only waits for SIGTERM would leave this worker running
+        # and never restore after its owned supervisor exits.
+        supervisor, worker = self.original()
+        result = self.launch_managed(supervisor, worker)
+        _, _ = self.managed_ready(result)
+        trial = next(int(row[1]) for row in self.events() if row[0] == "start" and row[3] == "1")
+        os.kill(trial, signal.SIGKILL)
+        _, finished = self.finish(result)
+        self.assertIn("result restored", finished)
+        self.assertEqual([row[3] for row in self.events() if row[0] == "start"], ["0", "1", "0"])
+
+    def test_uncompiled_launchers_reject_managed_before_signalling(self):
+        supervisor, worker = self.original()
+        for launcher in (self.launcher, self.bridge_launcher):
+            result = self.launch_managed(supervisor, worker, launcher)
+            self.assertNotEqual(result.returncode, 0)
+        os.kill(supervisor, 0)
+        os.kill(worker, 0)
+        self.assertEqual(len([row for row in self.events() if row[0] == "start"]), 1)
+
+    def test_managed_build_requires_bridge_capability(self):
+        result = subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                                 "-DAX520_LAUNCHER_ENABLE_MANAGED",
+                                 "-c", str(SOURCE / "observer_trial.c"),
+                                 "-o", str(self.artifacts / "invalid-managed.o")],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
 
     def test_trial_restores_once_without_preload_and_reports_only_metadata(self):
         supervisor, worker = self.original()

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
- * Temporary, bounded stock trial. Observer-only unless built and invoked for a bridge.
+ * Stock process owner: bounded trials or an explicitly selected managed bridge.
  * Linux 4.9 has no pidfds: PID/starttime checks reduce but cannot remove races.
  */
 #define _GNU_SOURCE
@@ -36,6 +36,10 @@
 #define TRIAL_MS 20000
 #endif
 
+#if defined(AX520_LAUNCHER_ENABLE_MANAGED) && !defined(AX520_LAUNCHER_ENABLE_BRIDGE)
+#error "Managed mode requires the explicit bridge capability"
+#endif
+
 extern char **environ;
 struct identity { pid_t pid, parent, group; unsigned long long start; char state; };
 struct resources {
@@ -48,7 +52,7 @@ static struct resources resource;
 static const char *env_keys[] = {"WORKDIR", "LD_LIBRARY_PATH", "PATH", "LY_PLATFORM",
                                "LY_MFI_I2C_BUS", "LY_ENCRYPT_I2C_BUS"};
 static volatile sig_atomic_t interrupted;
-static int device_bridge;
+static int device_bridge, managed_bridge;
 static int observation_ms = TRIAL_MS;
 
 static int64_t now_ms(void) {
@@ -540,7 +544,22 @@ static void observe(int fd, pid_t trial) {
     unsigned char event[12];
     int selected_seen = 0;
     int64_t deadline = now_ms() + observation_ms;
-    while (!interrupted && within(deadline)) {
+    while (!interrupted && (managed_bridge || within(deadline))) {
+        if (managed_bridge) {
+            /* Observe this unreaped child without consuming its wait status.
+             * Existing cleanup still owns termination and reaping, including
+             * any worker remaining after its supervisor exits. */
+            siginfo_t state = {0};
+            int result = waitid(P_PID, (id_t)trial, &state, WEXITED | WNOHANG | WNOWAIT);
+            if (result < 0 && errno != EINTR) {
+                note("managed supervisor_unverified");
+                break;
+            }
+            if (!result && state.si_pid == trial) {
+                note("managed supervisor_exited");
+                break;
+            }
+        }
         struct pollfd descriptor = {fd, POLLIN, 0};
         int ready = poll(&descriptor, 1, 20);
         if (ready > 0 && (descriptor.revents & POLLIN)) {
@@ -574,7 +593,7 @@ static void watchdog(const struct identity *supervisor, const struct identity *w
     close_except(keep, sizeof keep / sizeof *keep);
     int observer[2];
     if (pipe2(observer, O_CLOEXEC | O_NONBLOCK)) _exit(2);
-    note(device_bridge ? "mode device_bridge" : "mode observer");
+    note(managed_bridge ? "mode managed_device_bridge" : device_bridge ? "mode device_bridge" : "mode observer");
     note("stage armed");
     char ready = 'A';
     if (write(armed, &ready, 1) != 1) _exit(2);
@@ -636,6 +655,13 @@ static int parse_pid(const char *text, pid_t *pid) {
 
 int main(int argc, char **argv) {
     pid_t supervisor_pid, worker_pid;
+#ifdef AX520_LAUNCHER_ENABLE_MANAGED
+    if (argc == 5 && !strcmp(argv[1], "--managed-device-bridge")) {
+        managed_bridge = device_bridge = 1;
+        --argc;
+        ++argv;
+    }
+#endif
 #ifdef AX520_LAUNCHER_ENABLE_BRIDGE
     if (argc == 6 && !strcmp(argv[1], "--device-bridge")) {
         unsigned seconds = 0;

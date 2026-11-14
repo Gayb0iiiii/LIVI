@@ -1,0 +1,72 @@
+{
+  "files": {
+    "service.py": {
+      "sha256": "e319e7ea5f55afcf5d4e9d46eca66ca5b5e7b4cd42ed7c82cfa6aba3165a3d80",
+      "bytes": 24379
+    },
+    "capture_receipt.py": {
+      "sha256": "bc7c1db3fe98cdbc76b354bed6199dbc6f6298cffd426d0108a8115e05d1ed1a",
+      "bytes": 5278
+    },
+    "rollback.py": {
+      "sha256": "0582638ded981797b55a9aa10a82cc2d7dc472e18c9cf7c1b36e4c08fd72115d",
+      "bytes": 8720
+    },
+    "test_service.py": {
+      "sha256": "30e0e8557c6f28362708fe77a8418f2fd07b901f330748509cd1f9f33fb807c6",
+      "bytes": 7952
+    },
+    "test_rollback.py": {
+      "sha256": "d488d4364fac0085d695cb81b50adfc208548f5ca8d710d767a1c590b9998f3d",
+      "bytes": 7866
+    },
+    "livi-ax520-auth.service": {
+      "sha256": "1bbbd6f765c858e2e906d67ff274a0f9d61d9201131d95bf047c005e13a1f0b5",
+      "bytes": 645
+    },
+    "README.md": {
+      "sha256": "752d63496e4a1823e29040b9b601b6ea8e7549d140b42ed24329bec55e82a7d5",
+      "bytes": 6456
+    },
+    "vendor/adb_observer.py": {
+      "sha256": "ddadaac2a6b21f0053e467ac3e76cf67351e2cc90711c5dce1a5b263610f2ffb",
+      "bytes": 20206
+    },
+    "vendor/endpoint.py": {
+      "sha256": "a2c8d72831f685f3118911518f34cc826c788bd0b9b0ef3cef26bb804269451e",
+      "bytes": 28293
+    },
+    "vendor/verifier.py": {
+      "sha256": "6b811f7439c4c4b8cf53fb579c305f0415882a99f8ba5dcd94b6eb2898a2af3a",
+      "bytes": 24946
+    },
+    "livi-ax520-auth.boot.service": {
+      "sha256": "e0a352770ab5facfcd5a2bfcbb6f54298557c71054dd2efcc70da6917f5b3982",
+      "bytes": 440
+    },
+    "boot.py": {
+      "sha256": "4bcc21f46c9170d35b3ec210313047c3ede088ec0e16ae5bdeaa10aac8a88e4a",
+      "bytes": 5739
+    },
+    "test_boot.py": {
+      "sha256": "b0c6417f8967568faac60a9d8b15f44160e975f9b0ba441169629912911822ca",
+      "bytes": 3841
+    }
+  },
+  "verification": {
+    "tests_passed": 26,
+    "python_compile": true,
+    "systemd_analyze_verify_system_mode": true,
+    "systemd_user_manager_available_in_build_environment": false,
+    "matching_stock_busybox_shell_syntax": true,
+    "independent_lifecycle_review": true,
+    "target_managed_mode_tested": true,
+    "live_calls": true,
+    "host_discovery_and_restart_verified": true,
+    "dongle_reboot_verified": true,
+    "usb_bus_discovery_tested": true
+  },
+  "deployment_root": "/home/cruiser/LIVI/ax520-current-boot-service",
+  "unit": "livi-ax520-auth.service",
+  "activation": "Device stock-first boot hook starts managed bridge then USB; host boot.py discovers verified current owners and reattaches the existing LIVI endpoint."
+}

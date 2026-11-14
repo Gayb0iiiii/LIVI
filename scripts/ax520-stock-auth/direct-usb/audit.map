@@ -1,0 +1,4 @@
+{
+ global: open; write; close; access;
+ local: *;
+};

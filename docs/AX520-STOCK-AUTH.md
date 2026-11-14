@@ -1,5 +1,15 @@
 # AX520 stock authentication control flow
 
+## Direct USB startup validation, 2026-11-14
+
+The managed bridge ran through stock ADB USB on the same AX520. Dedicated host forwarding and metadata responses passed, and two host service restarts reattached without restarting the stock owners. A dongle reboot then recreated the bridge and ADB interface from generated compressed helpers in UDISK. The original customer application and SDK remained in place. No firmware partition was flashed for this startup change.
+
+The initial bootstrap incorrectly required `/tmp/lyrcpok`; the original stock script proceeds after its own timeout without that marker. Removing the additional wait allowed the next observed dongle boot to reach `helpers_verified`, `bridge_ready` and `ready`. The Pi uses its enabled user service to discover and verify the fresh device owners.
+
+A separate Cruiser reboot renumbered USB controllers and the published updater replaced the custom AppImage. Startup now discovers the unique AX520 ADB descriptor instead of assuming bus4, and the verified ff575d0 AppImage was restored from the preserved copy. An idle helper refresh after provider readiness handles LIVI starting before the provider. Wired helper verification uses process ownership and core ancestry instead of requiring a Bluetooth shared socket. The replaced published AppImage was retained. LIVI recreated/migrated configuration files during startup; byte-for-byte configuration preservation was not verified for that replacement.
+
+The [direct USB source and operator guide](../scripts/ax520-stock-auth/direct-usb/README.md) includes the startup scripts, device-specific host service and rollback protocol. Synthetic validation passed71 native bridge tests,10 managed USB tests,26 host tests, and bootstrap success/corruption cases. A subsequent live wired-phone test through the direct USB bridge recorded fresh MFi authentication acceptance and an active CarPlay session with video and playing flags. The Mac was not in that authentication transport. Physical touch confirmation, audible audio and a complete reconnect cycle remain separate acceptance checks. The earlier phone-accepted CarPlay/video/touch result used the Mac forwarding path.
+
 Static analysis and bounded reads of existing runtime state began on 2026-11-12; the target validation below includes temporary stock-process observer and bridge trials on 2026-11-13. The initial analysis did not launch another stock binary or change live settings. The later trials restarted the stock application and verified its normal restoration. No certificate, private key or decoded identity data was extracted. Addresses below are ARM ELF virtual addresses; stripped functions require Thumb disassembly (`objdump -M force-thumb`).
 
 Analyzed backup SHA-256: `84e852d1da60dcca0f46c2a517419560d62b452d58093d59b590e6a021c05010`.
