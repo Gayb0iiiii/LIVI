@@ -40,7 +40,7 @@ To return the dongle's next boot to normal stock, use its existing root shell to
 
 The device verifies exact binary hashes. A rebuild with different toolchain inputs needs updated, reviewed pins; source equivalence alone is insufficient. The live compressed artifacts and deployment receipt are backed up separately on Cruiser.
 
-Live direct USB testing received phone authentication success and observed an active CarPlay video session. Audible audio remains unverified.
+Live direct USB testing received phone authentication success and observed an active CarPlay video session. The owner confirmed that CarPlay returned after unplug/reconnect with touch working, following an initial attempt without touch. Audible audio and a final whole-system power-cycle remain unverified.
 
 Synthetic checks:
 
