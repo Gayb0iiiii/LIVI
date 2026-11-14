@@ -32,6 +32,8 @@ pub struct Config {
     pub car_play_mfi_i2c_bus: u32,
     pub car_play_mfi_power_gpio: i32,
     pub car_play_mfi_files: String,
+    #[serde(default)]
+    pub car_play_mfi_endpoint: String,
     pub car_play_vehicle_climate: bool,
     pub car_play_dock_position: DockPosition,
     pub car_play_cluster_content: ClusterContent,
@@ -553,6 +555,7 @@ pub fn defaults() -> Config {
         car_play_mfi_i2c_bus: 2,
         car_play_mfi_power_gpio: -1,
         car_play_mfi_files: String::new(),
+        car_play_mfi_endpoint: String::new(),
         car_play_vehicle_climate: false,
         car_play_dock_position: DockPosition::Bottom,
         car_play_cluster_content: ClusterContent::Map,
@@ -732,6 +735,15 @@ fn default_bindings() -> KeyBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn older_configs_leave_the_external_mfi_endpoint_disabled() {
+        let mut value = serde_json::to_value(defaults()).unwrap();
+        assert_eq!(value["carPlayMfiEndpoint"], "");
+        value.as_object_mut().unwrap().remove("carPlayMfiEndpoint");
+        let cfg: Config = serde_json::from_value(value).unwrap();
+        assert!(cfg.car_play_mfi_endpoint.is_empty());
+    }
 
     fn coupled(stored: [bool; 4], asked: &[(&str, bool)]) -> [bool; 4] {
         let mut cfg = defaults();

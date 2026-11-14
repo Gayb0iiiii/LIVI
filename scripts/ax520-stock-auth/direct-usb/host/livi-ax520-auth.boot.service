@@ -1,0 +1,19 @@
+[Unit]
+Description=LIVI AX520 USB authentication connection
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/cruiser/LIVI/ax520-current-boot-service/boot.py
+WorkingDirectory=/home/cruiser/LIVI/ax520-current-boot-service
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=78
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target

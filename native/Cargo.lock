@@ -4128,6 +4128,7 @@ dependencies = [
  "iap2-mfi",
  "iap2-usbmux",
  "iap2-wired",
+ "libc 1.0.0-alpha.5",
  "livi-aa",
  "livi-bt-host",
  "livi-core-proto",

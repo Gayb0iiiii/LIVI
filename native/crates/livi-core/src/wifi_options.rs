@@ -170,6 +170,9 @@ fn bands_in(radio: Option<&Radio>, country: &str, six_ghz_ap: bool) -> Vec<WifiB
 }
 
 async fn options(cfg: &Config) -> (Vec<WifiBand>, Vec<u32>) {
+    if cfg.wifi_interface == livi_core_proto::ax520::CHOICE {
+        return (vec![cfg.wifi_type], vec![cfg.wifi_channel]);
+    }
     let phy = phy_of(&cfg.wifi_interface);
     let iface = cfg.wifi_interface.clone();
     let (listing, six_ghz_ap) = tokio::task::spawn_blocking(move || {
@@ -188,6 +191,9 @@ async fn options(cfg: &Config) -> (Vec<WifiBand>, Vec<u32>) {
 }
 
 fn corrected(cfg: &Config, bands: &[WifiBand], chans: &[u32]) -> Option<serde_json::Value> {
+    if cfg.wifi_interface == livi_core_proto::ax520::CHOICE {
+        return None;
+    }
     if !bands.is_empty() && !bands.contains(&cfg.wifi_type) {
         return Some(serde_json::json!({ "wifiType": Band::Ghz5.setting() }));
     }
@@ -260,6 +266,18 @@ pub async fn follow(core: Arc<Core>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stock_ap_options_preserve_the_external_channel_without_radio_correction() {
+        let mut cfg = crate::config_file::defaults();
+        cfg.wifi_interface = "ax520-stock".into();
+        cfg.wifi_type = WifiBand::Ghz5;
+        cfg.wifi_channel = 44;
+        let (bands, channels) = options(&cfg).await;
+        assert_eq!(bands, [WifiBand::Ghz5]);
+        assert_eq!(channels, [44]);
+        assert_eq!(corrected(&cfg, &[WifiBand::Ghz24], &[6]), None);
+    }
 
     const LISTING: &str = "country DE\nphy phy0\nchan 1 2412 ok 20\nchan 6 2437 ok 20\n\
         chan 12 2467 no-ir 20\nchan 36 5180 ok 23\nchan 52 5260 ok 23\nchan 149 5745 ok 14\n\

@@ -51,6 +51,8 @@ struct Held {
     _bonjour: Option<Bonjour>,
     #[cfg(target_os = "linux")]
     bluetooth: (watch::Sender<bool>, tokio::task::JoinHandle<()>),
+    #[cfg(target_os = "linux")]
+    _stock_net: Option<Arc<livi_link_host::external_net::Handle>>,
 }
 
 impl Held {
@@ -105,7 +107,7 @@ impl Drop for Embedded {
     }
 }
 
-fn chip(start: &HelperStart, host: &Host) -> Option<Box<dyn AuthCoprocessor + Send>> {
+fn local_chip(start: &HelperStart, host: &Host) -> Option<Box<dyn AuthCoprocessor + Send>> {
     if let Some(files) = crate::mfi::open_in(&host.mfi) {
         return Some(Box::new(files));
     }
@@ -133,7 +135,17 @@ fn chip(start: &HelperStart, host: &Host) -> Option<Box<dyn AuthCoprocessor + Se
 fn serve(start: HelperStart, host: Host) -> Held {
     #[cfg(target_os = "linux")]
     tokio::task::spawn_blocking(iap2_usbmux::drop_name_bound_profiles);
-    let chip = chip(&start, &host);
+    let endpoint_configured = !start.settings.mfi_endpoint.is_empty();
+    let chip = match crate::mfi::select(&start.settings.mfi_endpoint, || local_chip(&start, &host))
+    {
+        Ok(chip) => chip,
+        Err(error) => {
+            eprintln!(
+                "[helper] configured MFi endpoint failed: {error}; CarPlay authentication unavailable"
+            );
+            None
+        }
+    };
     let own_chip = chip.is_some();
     let link = watch_link(&host);
     let over_dongle = start.settings.bt_adapter == livi_link_host::link::CHOICE;
@@ -149,6 +161,41 @@ fn serve(start: HelperStart, host: Host) -> Held {
         ap_on_air: dongle_ap
             .then_some(livi_link_host::ap::on_air as livi_runtime::bringup::AskOnAir),
         ..cp
+    };
+    #[cfg(target_os = "linux")]
+    let (identity, cp) = {
+        let (mut identity, mut cp) = (identity, cp);
+        if start.settings.wifi_iface == livi_core_proto::ax520::CHOICE
+            && let Err(error) = crate::ax520_stock::configure(
+                &host.mfi,
+                &start.settings.passphrase,
+                &mut identity,
+                &mut cp,
+            )
+        {
+            eprintln!("[helper] {error}; stock wireless is unavailable, wired CarPlay carries on");
+        }
+        (identity, cp)
+    };
+    #[cfg(target_os = "linux")]
+    let stock_net = if start.settings.wifi_iface == livi_core_proto::ax520::CHOICE
+        && crate::ax520_stock::configured()
+    {
+        match livi_link_host::external_net::attach_external() {
+            Ok(handle) => {
+                let handle = Arc::new(handle);
+                crate::ax520_stock::bind_transport(&handle);
+                Some(handle)
+            }
+            Err(error) => {
+                eprintln!(
+                    "[helper] stock AP transport unavailable: {error}; wired CarPlay carries on"
+                );
+                None
+            }
+        }
+    } else {
+        None
     };
     let bcast = Broadcaster::default();
     let state = Arc::new(HelperState::default());
@@ -239,7 +286,15 @@ fn serve(start: HelperStart, host: Host) -> Held {
     };
     #[cfg(target_os = "linux")]
     let gone = || {};
-    crate::link::follow_link(link.clone(), auth.clone(), own_chip, bcast.clone(), gone);
+    // An explicit endpoint must never be replaced by a different identity when
+    // a LIVI Link arrives, even if the configured endpoint failed its check.
+    crate::link::follow_link(
+        link.clone(),
+        auth.clone(),
+        own_chip || endpoint_configured,
+        bcast.clone(),
+        gone,
+    );
     tokio::spawn(crate::link::identify_on_link(link.clone(), auth.clone()));
     if dongle_ap {
         tokio::spawn(crate::link::relay_stations(bcast.clone()));
@@ -342,7 +397,7 @@ fn serve(start: HelperStart, host: Host) -> Held {
     #[cfg(target_os = "macos")]
     let shared_bluetooth = None;
     #[cfg(not(target_os = "linux"))]
-    serve_shared(&host.sockets.shared, shared_bluetooth, dongle_ap);
+    serve_shared(&host.sockets.shared, shared_bluetooth, dongle_ap, false);
     #[cfg(target_os = "linux")]
     let bluetooth = {
         let (stop, stopped) = watch::channel(false);
@@ -368,12 +423,13 @@ fn serve(start: HelperStart, host: Host) -> Held {
             sco_sink: sco_sink.clone(),
         };
         let shared = host.sockets.shared.clone();
+        let stock_ap = cp.wifi_iface == livi_core_proto::ax520::INTERFACE;
         let task = tokio::spawn(async move {
             if let Err(e) = crate::bluez::serve(b, stopped).await {
                 eprintln!(
                     "[helper] no Bluetooth ({e}), wireless Android Auto and calls are off, wired Android Auto and CarPlay carry on"
                 );
-                serve_shared(&shared, None, dongle_ap);
+                serve_shared(&shared, None, dongle_ap, stock_ap);
             }
         });
         (stop, task)
@@ -393,6 +449,10 @@ fn serve(start: HelperStart, host: Host) -> Held {
         state,
         link: if own_chip {
             LinkPresence::always()
+        } else if endpoint_configured {
+            // Keep wired bring-up closed after an endpoint failure. Restart the
+            // helper once the forwarding connection/provider is available.
+            LinkPresence::new()
         } else {
             link
         },
@@ -412,6 +472,8 @@ fn serve(start: HelperStart, host: Host) -> Held {
         _bonjour: bonjour,
         #[cfg(target_os = "linux")]
         bluetooth,
+        #[cfg(target_os = "linux")]
+        _stock_net: stock_net,
     }
 }
 
@@ -515,13 +577,22 @@ fn serve_shared(
     path: &std::path::Path,
     bluetooth: Option<livi_runtime::shared_sock::Bluetooth>,
     dongle_ap: bool,
+    stock_ap: bool,
 ) {
     let deps = livi_runtime::shared_sock::SharedSockDeps {
         adapter: String::new(),
-        wifi_iface: String::new(),
+        wifi_iface: if stock_ap {
+            livi_core_proto::ax520::INTERFACE.into()
+        } else {
+            String::new()
+        },
         events: Broadcaster::default(),
         set_playback_status: Box::new(|_| {}),
-        deauth_dongle: dongle_ap.then_some(livi_link_host::ap::deauth as fn() -> Option<usize>),
+        deauth_dongle: if stock_ap {
+            Some(|| None)
+        } else {
+            dongle_ap.then_some(livi_link_host::ap::deauth as fn() -> Option<usize>)
+        },
         bluetooth,
     };
     let path = path.to_path_buf();

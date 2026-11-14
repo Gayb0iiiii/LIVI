@@ -724,7 +724,7 @@ impl ConfigSource {
                             .flatten(),
                     )
                 },
-                access_point: wifi
+                access_point: (wifi && cfg.wifi_interface != livi_core_proto::ax520::CHOICE)
                     .then(|| livi_link_host::on_air(&cfg.wifi_interface))
                     .flatten(),
             }

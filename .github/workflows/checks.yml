@@ -211,3 +211,6 @@ jobs:
 
       - name: Check the license headers
         run: sh scripts/spdx-header.sh --check
+
+      - name: Test AX520 bridge prototype with synthetic provider
+        run: python3 scripts/ax520-stock-auth/run_tests.py

@@ -66,7 +66,14 @@ fn tunnelled(dir: &Path, hci: &str) -> bool {
 }
 
 fn bt_mac_in(dir: &Path, adapter: &str) -> Result<Option<String>, ()> {
-    let adapter = if adapter == livi_link_host::link::CHOICE {
+    let stock = adapter == livi_core_proto::ax520::CHOICE;
+    let adapter = if stock {
+        let mut candidates = entries(dir).into_iter().filter(|n| tunnelled(dir, n));
+        match (candidates.next(), candidates.next()) {
+            (Some(hci), None) => hci,
+            _ => return Err(()),
+        }
+    } else if adapter == livi_link_host::link::CHOICE {
         match entries(dir).into_iter().find(|n| tunnelled(dir, n)) {
             Some(hci) => hci,
             None => return Err(()),
@@ -84,7 +91,8 @@ fn bt_mac_in(dir: &Path, adapter: &str) -> Result<Option<String>, ()> {
     };
     Ok(candidates
         .iter()
-        .find_map(|name| mac_in(&dir.join(name).join("address"))))
+        .find_map(|name| mac_in(&dir.join(name).join("address")))
+        .filter(|mac| !stock || (mac != "00:00:00:00:00:00" && mac != "FF:FF:FF:FF:FF:FF")))
 }
 
 fn busctl(adapter: &str) -> Option<String> {
@@ -137,7 +145,13 @@ fn wifi_mac_in(dir: &Path, iface: &str) -> Option<String> {
 fn wifi_interfaces_in(dir: &Path) -> Vec<String> {
     entries(dir)
         .into_iter()
-        .filter(|n| dir.join(n).join("wireless").exists())
+        .filter_map(|n| {
+            if n == livi_core_proto::ax520::INTERFACE {
+                Some(livi_core_proto::ax520::CHOICE.into())
+            } else {
+                dir.join(&n).join("wireless").exists().then_some(n)
+            }
+        })
         .collect()
 }
 
@@ -156,8 +170,18 @@ fn bt_adapters_in(dir: &Path) -> Vec<String> {
         .collect()
 }
 
+fn bt_adapters_with_stock(bt: &Path, net: &Path) -> Vec<String> {
+    let mut adapters = bt_adapters_in(bt);
+    if net.join(livi_core_proto::ax520::INTERFACE).exists()
+        && bt_mac_in(bt, livi_core_proto::ax520::CHOICE).is_ok_and(|mac| mac.is_some())
+    {
+        adapters.push(livi_core_proto::ax520::CHOICE.into());
+    }
+    adapters
+}
+
 pub fn bt_adapters() -> Vec<String> {
-    bt_adapters_in(Path::new(BT_SYSFS))
+    bt_adapters_with_stock(Path::new(BT_SYSFS), Path::new(NET_SYSFS))
 }
 
 const CHIPS: [(u16, u16, &str); 11] = [
@@ -250,6 +274,53 @@ mod tests {
         assert_eq!(bt_mac_in(&dir.0, ""), Ok(Some("11:22:33:44:55:66".into())));
         assert_eq!(bt_mac_in(&dir.0, "hci9"), Ok(None));
         assert_eq!(bt_mac_in(&dir.0, livi_link_host::link::CHOICE), Err(()));
+    }
+
+    #[test]
+    fn stock_backend_identity_requires_its_tap_and_one_virtual_controller() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new();
+        let net = dir.0.join("net");
+        fs::create_dir_all(net.join("eth0")).unwrap();
+        assert!(wifi_interfaces_in(&net).is_empty());
+        fs::create_dir_all(net.join("ax520cp0")).unwrap();
+        assert_eq!(wifi_interfaces_in(&net), ["ax520-stock"]);
+        write(&net.join("ax520cp0/address"), "02:10:20:30:40:60");
+        assert_eq!(
+            wifi_mac_in(&net, "ax520-stock"),
+            None,
+            "the TAP address is not the stock AP BSSID"
+        );
+        let bt = dir.0.join("bt");
+        fs::create_dir_all(&bt).unwrap();
+        write(&bt.join("hci0/address"), "02:10:20:30:40:70");
+        assert_eq!(
+            bt_mac_in(&bt, "ax520-stock"),
+            Err(()),
+            "do not select a native radio"
+        );
+        let virtuals = dir.0.join("devices/virtual/bluetooth");
+        write(&virtuals.join("hci4/address"), "00:00:00:00:00:00");
+        symlink(virtuals.join("hci4"), bt.join("hci4")).unwrap();
+        assert_eq!(
+            bt_mac_in(&bt, "ax520-stock"),
+            Ok(None),
+            "wait for the controller address to initialize"
+        );
+        assert_eq!(bt_adapters_with_stock(&bt, &net), ["hci0"]);
+        write(&virtuals.join("hci4/address"), "02:10:20:30:40:80");
+        assert_eq!(bt_adapters_with_stock(&bt, &net), ["hci0", "ax520-stock"]);
+        assert_eq!(
+            bt_mac_in(&bt, "ax520-stock"),
+            Ok(Some("02:10:20:30:40:80".into()))
+        );
+        write(&virtuals.join("hci5/address"), "02:10:20:30:40:90");
+        symlink(virtuals.join("hci5"), bt.join("hci5")).unwrap();
+        assert_eq!(
+            bt_mac_in(&bt, "ax520-stock"),
+            Err(()),
+            "ambiguous controllers must not be guessed"
+        );
     }
 
     #[test]

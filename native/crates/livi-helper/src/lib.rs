@@ -4,6 +4,8 @@
 
 pub mod aa;
 #[cfg(target_os = "linux")]
+pub mod ax520_stock;
+#[cfg(target_os = "linux")]
 pub mod bluez;
 #[cfg(not(target_os = "linux"))]
 pub mod bt_dongle;

@@ -1,0 +1,7 @@
+__pycache__/
+*.o
+*.so
+relay-host
+relay-arm
+test-run
+test-probe

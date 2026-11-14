@@ -17,6 +17,7 @@ const CONNECTORS: &str = "LIVI_CP_CONNECTORS";
 const THEME: &str = "LIVI_CP_THEME";
 const BT_ADAPTER: &str = "LIVI_BT_ADAPTER";
 const MFI_FILES: &str = "LIVI_MFI_FILES";
+const MFI_ENDPOINT: &str = "LIVI_MFI_ENDPOINT";
 const WIFI_IFACE: &str = "LIVI_WIFI_IFACE";
 const PASSPHRASE: &str = "LIVI_PASSPHRASE";
 const WIFI_TYPE: &str = "LIVI_WIFI_TYPE";
@@ -71,6 +72,7 @@ pub struct HelperSettings {
     pub theme: String,
     pub bt_adapter: String,
     pub mfi_files: String,
+    pub mfi_endpoint: String,
     pub wifi_iface: String,
     pub passphrase: String,
     pub wifi_type: String,
@@ -109,6 +111,7 @@ impl Default for HelperSettings {
             theme: String::new(),
             bt_adapter: String::new(),
             mfi_files: String::new(),
+            mfi_endpoint: String::new(),
             wifi_iface: String::new(),
             passphrase: String::new(),
             wifi_type: String::new(),
@@ -143,6 +146,7 @@ impl HelperStart {
             (THEME, s.theme.clone()),
             (BT_ADAPTER, s.bt_adapter.clone()),
             (MFI_FILES, s.mfi_files.clone()),
+            (MFI_ENDPOINT, s.mfi_endpoint.clone()),
             (WIFI_IFACE, s.wifi_iface.clone()),
             (PASSPHRASE, s.passphrase.clone()),
             (WIFI_TYPE, s.wifi_type.clone()),
@@ -183,6 +187,7 @@ impl HelperStart {
                 theme: text(THEME),
                 bt_adapter: text(BT_ADAPTER),
                 mfi_files: text(MFI_FILES),
+                mfi_endpoint: text(MFI_ENDPOINT),
                 wifi_iface: text(WIFI_IFACE),
                 passphrase: text(PASSPHRASE),
                 wifi_type: text(WIFI_TYPE),
@@ -229,6 +234,7 @@ mod tests {
                 theme: "44C9FA31EC:985:19.0".into(),
                 bt_adapter: "hci1".into(),
                 mfi_files: "files".into(),
+                mfi_endpoint: "127.0.0.1:15000".into(),
                 wifi_iface: "wlan1".into(),
                 passphrase: "12345678".into(),
                 wifi_type: "2.4ghz".into(),

@@ -1,0 +1,259 @@
+# AX520 stock authentication control flow
+
+## Direct USB startup validation, 2026-11-14
+
+The managed bridge ran through stock ADB USB on the same AX520. Dedicated host forwarding and metadata responses passed, and two host service restarts reattached without restarting the stock owners. A dongle reboot then recreated the bridge and ADB interface from generated compressed helpers in UDISK. The original customer application and SDK remained in place. No firmware partition was flashed for this startup change.
+
+The initial bootstrap incorrectly required `/tmp/lyrcpok`; the original stock script proceeds after its own timeout without that marker. Removing the additional wait allowed the next observed dongle boot to reach `helpers_verified`, `bridge_ready` and `ready`. The Pi uses its enabled user service to discover and verify the fresh device owners.
+
+A separate Cruiser reboot renumbered USB controllers and the published updater replaced the custom AppImage. Startup now discovers the unique AX520 ADB descriptor instead of assuming bus4, and the verified ff575d0 AppImage was restored from the preserved copy. An idle helper refresh after provider readiness handles LIVI starting before the provider. Wired helper verification uses process ownership and core ancestry instead of requiring a Bluetooth shared socket. The replaced published AppImage was retained. LIVI recreated/migrated configuration files during startup; byte-for-byte configuration preservation was not verified for that replacement.
+
+The [direct USB source and operator guide](../scripts/ax520-stock-auth/direct-usb/README.md) includes the startup scripts, device-specific host service and rollback protocol. Synthetic validation passed71 native bridge tests,10 managed USB tests,26 host tests, and bootstrap success/corruption cases. A subsequent live wired-phone test through the direct USB bridge recorded fresh MFi authentication acceptance and an active CarPlay session with video and playing flags. The Mac was not in that authentication transport. The owner initially reported CarPlay without touch, then confirmed that a subsequent unplug/reconnect returned CarPlay with touch working. Audible audio and a final whole-system power-cycle remain unverified. The earlier phone-accepted CarPlay/video/touch result used the Mac forwarding path.
+
+Static analysis and bounded reads of existing runtime state began on 2026-11-12; the target validation below includes temporary stock-process observer and bridge trials on 2026-11-13. The initial analysis did not launch another stock binary or change live settings. The later trials restarted the stock application and verified its normal restoration. No certificate, private key or decoded identity data was extracted. Addresses below are ARM ELF virtual addresses; stripped functions require Thumb disassembly (`objdump -M force-thumb`).
+
+Analyzed backup SHA-256: `84e852d1da60dcca0f46c2a517419560d62b452d58093d59b590e6a021c05010`.
+The original backup is retained outside this repository. No firmware or proprietary library is included here.
+
+| File within customer partition | SHA-256                                                            |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `app/libiap_new.so`            | `19326c5b73c61fd5a604d114ad49035a3730c7d12bfacaef165f7048e8f42e53` |
+| `app/lylinkapp`                | `55afbb890397b41d3393f1a98a82a5d425fb5fb78b97431f8dad48990ce509f2` |
+| `app/ly_testcp`                | `ffe245a28de3dba0bc115f08ea0ecad2d80a8b1ea1cab9a2902524375167339b` |
+
+The [experimental external MFi provider](EXTERNAL-MFI.md) supplies a host integration point only. It does not implement or validate the stock device's provider.
+
+## Reported runtime evidence
+
+On 2026-11-12 the owner returned this filtered log line from Codex running on the Mac connected to the stock dongle's Wi-Fi and existing TCP 2323 shell:
+
+```text
+01-01 00:00:08.622   987   987 D linkapp : findMfi end ADDR_I2C = 20,PATH_I2C=ly_iap
+```
+
+This provides live evidence that `lylinkapp` selected `ly_iap` (address printed in hexadecimal: `0x20`). Combined with the dispatch below, it identifies the selected software authentication path. The device log clock is not synchronized; its January 1 timestamp is not the date of collection. This line was initially owner-relayed and subsequently confirmed by a direct filtered shell read.
+
+That initial query did not return an explicit `AUTHENTICATION_SUCCEEDED` marker. Provider selection alone does not establish iPhone acceptance. Subsequent direct evidence is described below.
+
+### Direct runtime verification through the private Mac tunnel
+
+The existing shell was subsequently reached through a loopback-only reverse SSH tunnel on Cruiser. `uname` reported Linux 4.9.337 / ARMv7. SHA-256 checks of the running filesystem's `libiap_new.so`, `lylinkapp`, and `ly_testcp` matched the three values above. Process maps showed the stock process loading `/mnt/customer/app/libiap_new.so` and `libwcarplay_new.so`.
+
+An on-device allowlist returned these session markers, with unrelated log data excluded:
+
+```text
+01-01 00:30:58.358   987   994 D lin _iAPStateCbOverBT state = 1
+01-01 00:30:59.321   987  1318 D lin _iAPStateCbOverBT state = 3
+```
+
+The collection script retained a 36-character log prefix plus the exact matched event label, so the tag is truncated. Code tracing establishes the meaning of state 3:
+
+1. Incoming control-message parsing at `libiap_new.so:0xc844` reads the message ID from bytes 4/5 and dispatches it to the authentication handler at `0xd174`.
+2. Message `0xaa05` (`AUTHENTICATION_SUCCEEDED`, from iDevice to accessory) takes `0xd242` and invokes the auth-result delegate with zero at `0xd26c–0xd26e`. Message `0xaa04` takes the failure path.
+3. The registered delegate `0x6868` converts result zero to state **3** at `0x6890`, then calls the application callback. The reviewed other state-callback sites emit start=1, stop=2, or failure=4. State 4 is not uniquely an authentication rejection.
+4. `lylinkapp:0x183de–0x183f0` registers `_iAPStateCbOverBT` with `CreateiAP2`.
+
+Together, matching code and the observed state 3 support stock processing the phone's acceptance of this iAP2 authentication exchange using its selected software provider. They do not establish a subsequent AirPlay authentication exchange, active video/audio/touch, or reconnection reliability.
+
+The supervisor then logged `wait iap timeout(1)` through `(12)`, from uptime `00:30:59.322` through `00:31:10.326`. Worker 987 logged signal 15 at `00:31:11.327`; the supervisor forked replacement worker 1322 at `00:31:14.329`. This matches the reviewed post-authentication wait timeout and SIGTERM/restart flow. It is evidence of a deliberate timeout, not a demonstrated signer crash. The later connection stage remains unresolved.
+
+These initial reads did not rerun `ly_testcp`, invoke the signing API, force a provider selection, or change stock processes/settings. Later trials below progressed from selector observation and restoration to received phone-authentication success with the explicit bridge endpoint. Complete CarPlay acceptance remains separate from these initial stock logs.
+
+## Verified selector and dispatch
+
+In `customer/app/libiap_new.so`:
+
+- Export `SetiAPI2CAddr` at `0x708c` ignores its original first argument, forwards argument 2 as the address and argument 3 as the path into internal selector `0x652c`, then calls initializer `0x65bc`.
+- At `0x6558` selector `0x652c` calls `strcmp(path, "ly_iap")`. Equality writes global auth mode **2** at `0x6562–0x6564`. Other paths write mode **1** at `0x6588–0x658a` and invoke hardware setup `0x4e34` with the provided address/path.
+- Initializer `0x65bc` invokes hardware initialization only for mode 1; mode 2 returns zero without that call.
+- Export `AuthDeviceCreateSignature` at `0x65dc` dispatches mode 2 to `0x6378` and other modes to hardware function `0x4f14`.
+- Export `AuthDeviceCopyCertificate` at `0x6600` dispatches mode 2 to `0x6470` and other modes to hardware function `0x546c`.
+
+Thus `ly_iap` is an explicit mode selector string. It is not opened as a device by these selector instructions.
+
+## What the software branch does
+
+- Signing function `0x6378` transforms an embedded 32-byte input into a temporary buffer via helper `0x633c`, allocates its output, and invokes internal helper `0x628c`. That helper copies a 32-byte input, performs internal computation through `0x615c`/`0x6228`, and copies two 32-byte result components to the output buffer. No external signing service or `/dev/ly_encry` call occurs in the displayed software entry routine.
+- Certificate function `0x6470` sets output length to **607**, allocates a fresh buffer, and invokes internal helper `0x633c` to populate it from embedded data. It returns zero on its normal path and minus one on allocation failure.
+- These are concrete software operations inside the library. Their existence alone does not prove selection or phone acceptance; the separate runtime evidence above addresses the observed iAP2 exchange.
+- The entry arguments have the expected shapes `AuthDeviceCreateSignature(digest, digest_len, &output, &output_len)` and `AuthDeviceCopyCertificate(&output, &output_len)`. Fresh allocation is visible. The ABI and ownership review below supplies static evidence; the later phone-acceptance trial adds integration evidence without tracing individual provider payloads or counting signing calls.
+- The inspected signing entry logs the supplied digest length but shows no rejection before the helper reads exactly 32 input bytes and writes 64 result bytes. A future wrapper must enforce the 32-byte input contract, validate advertised output length, and serialize calls because internal global scratch storage is visible. These are implementation prerequisites, not evidence that a wrapper has been tested.
+- The library is 32-bit ARM with uClibc dependencies `libstdc++.so.6`, `libgcc_s.so.1`, `libc.so.0`, plus ELF init/init-array entries. It cannot simply be loaded into Cruiser's native 64-bit process.
+
+No embedded credential bytes were inspected or recorded. No persistent authentication service has been installed; the temporary bridge trial below is a separate validation step.
+
+## `/dev/ly_encry` detection in `ly_testcp`
+
+Function `0x1b968` performs a local probe:
+
+1. Opens `/dev/ly_encry` with flags zero (read only) at `0x1b9ac`.
+2. Sends ioctl **`0x40046551`** at `0x1b9d6`. The supplied word is the bitwise complement of a locally obtained value.
+3. Tests whether the returned word equals the original value plus one at `0x1ba04–0x1ba20`.
+4. If successful, returns **1** at `0x1ba5e`. If unsuccessful, calls the hardware test at `0x1b6f4` for addresses **0x10**, then **0x11** (`0x1ba4c–0x1ba56`).
+
+Main calls this function at `0x12b0e`, stores the result at `0x12b12`, and logs it as the MFi state. Therefore a positive `mfi State`/`bLyChip` result can originate from this local driver probe. It is not an end-to-end phone authentication result. The driver's implementation has not been independently analyzed in this pass; the caller's test does not establish what hardware, if any, lies behind the ioctl.
+
+## Selection in `lylinkapp`
+
+- Its `findMfi` code opens `/dev/ly_encry` at `0x18796`, issues the same ioctl at `0x187b2`, and checks the same reply relation.
+- Success follows `0x188a8–0x188ce`, copies the literal `ly_iap` to the stored authentication path at `0x188de–0x188fa`, and sets the stored address to **0x20** at `0x188fe`.
+- Failure takes the I2C path from `0x187e4`. It gets `LY_MFI_I2C_BUS`, constructs `/dev/i2c-%s`, and probes 0x10/0x11 using register 0x04 writes and four-byte reads. This is an active hardware probe; do not execute it merely to inspect status.
+- The final diagnostic line is exactly `findMfi end ADDR_I2C = %x,PATH_I2C=%s`.
+- Bluetooth and Wi-Fi iAP setup both pass the selected address/path to `SetiAPI2CAddr` at `0x18464` and `0x18230` respectively.
+
+The Bluetooth setter is reached during ordinary worker startup. The supervisor's child branch calls worker routine `0x14250`, which runs `findMfi` and calls Bluetooth initializer `0x18354` at `0x1432c`. With no existing context, that initializer calls `CreateiAP2` at `0x183f0` and then the setter at `0x18464`. This reviewed path has no phone-event prerequisite. The Wi-Fi initializer's observed direct caller at `0x19a54` instead belongs to the later `ReceiveDisableBluetooth` transition.
+
+This establishes the static path from the successful driver probe to the software auth selector. The runtime path-selection log above shows the live unit selecting that path.
+
+## Runtime prerequisites and existing logs
+
+The preserved `lyLink.sh` starts `logwrapper ly_testcp -f=2`, `rcpservice -k1`, `lyUpdate.sh`, `lyLoadModule.sh`, then waits up to about five seconds for `/tmp/lyrcpok` before starting `lylinkapp -w`. Relevant environment defaults in `/etc/profile` are `LY_MFI_I2C_BUS=2`, `LY_ENCRYPT_I2C_BUS=1`, and `IPADDR=192.168.50.100`.
+
+The rootfs includes `/sbin/logcat` and `/sbin/logwrapper`. The existing web CGI log collection uses `logcat -v threadtime -d` along with other data and writes `/tmp/log.gz`; the website's Submit action additionally uploads to the vendor. Prefer a local read-only logcat query over that CGI or Submit action.
+
+Once a shell is reachable, useful **allowlisted existing log markers** are:
+
+```text
+findMfi end ADDR_I2C = ... PATH_I2C=...
+g_authMode:...
+bLyChip = ...
+mfi State=...
+AUTHENTICATION_SUCCEEDED
+AUTHENTICATION_FAILED
+```
+
+A bounded shell query can run `logcat -v threadtime -d` with output filtered on-device for those markers; never transfer an unfiltered dump. Preserve timestamps and process tags. Exclude lines containing credential/certificate/key/challenge/signature data if logging is unexpectedly verbose.
+
+Interpretation:
+
+- `PATH_I2C=ly_iap` and `g_authMode:2` establish software mode selection in that logged process/session.
+- `bLyChip` or `mfi State` alone establish only a local probe result.
+- The library contains exact received-message markers `--[iDevice -> Acc]AUTHENTICATION_SUCCEEDED----iAP2 Connection Pass--` and `--[iDevice -> Acc]AUTHENTICATION_FAILED---iAP2 Connection Fail-----`. A timestamped live occurrence is evidence of the corresponding iAP2 event, subject to checking its process/session context.
+- An iAP2 success event still does not by itself verify the subsequent CarPlay/AirPlay authentication exchange, video, audio, touch or reconnection.
+- Absence of a marker is inconclusive if the ring buffer rotated or that component's logger is disabled.
+
+Safe prerequisites to read first are process presence, node existence, the expected stock library checksum, and `/tmp/lyrcpok`/`ly_author_*` marker **metadata only**. Do not rerun `ly_testcp`, force a mode, call the driver ioctl or execute a proposed signer wrapper before the runtime assumptions have been reviewed.
+
+## ABI and startup safety follow-up
+
+The ABI analysis below is static. The [prototype observer/interposer](../scripts/ax520-stock-auth/README.md) also has synthetic runtime validation and a completed real stock-process observation trial, described below. The latter observed the ordinary selector call; it did not validate the external certificate/signature path.
+
+### Constructors and per-process state
+
+- ELF `.init` at `0x1b98` is a trivial return. The three init-array entries are `0x1fbd`, `0x1ed9`, and `0x1ee5`: frame/TM registration and two C++ iostream initialization stubs. Their reviewed call paths do not initialize authentication or open the MFi device. Fini-array entries `0x1f65`, `0x1ec1`, and `0x1ecd` perform matching runtime cleanup. This is evidence about these functions, not a guarantee about every dependency's loader behavior.
+- The auth-mode global resolves through GOT slot `0x29f84` to DSO-relative address `0x2a31c`. Its initial byte is **1**, the hardware mode. A separate process loading this DSO gets its own state; it does not inherit the selection already made by the running `lylinkapp`.
+- Calling `SetiAPI2CAddr` with the literal `ly_iap` directly selects mode 2 unconditionally. It does not rerun the stock `/dev/ly_encry` decision. Using it as a fallback after a failed or unverified device check would bypass the normal stock provider selection and is outside this proposed integration.
+- No exported getter for the actual selected provider was found. A timestamped log can establish what a running process selected, but loading another process does not transfer that state. Reusing the dispatch inside the existing stock process would preserve the actual decision; such process integration requires a reviewed and validated mechanism. An independent helper would need an independently validated equivalent of the normal selection procedure, with explicit failure handling. Forcing mode 2 is not that procedure.
+
+### Function shapes and ownership
+
+ARM EABI call sites support these **inferred** C function shapes, with pointer and length values 32 bits in this binary:
+
+- `int SetiAPI2CAddr(void *context, int address, const char *path)` — the inspected implementation ignores `context`, but this is undocumented behavior. Normal stock supplies a real iAP context. It also invokes initialization. Internal initializer `0x65bc` calls hardware certificate initialization at `0x5798` for mode 1, then overwrites the result with zero. Therefore a zero return from the setter does **not** prove initialization succeeded.
+- `int AuthDeviceCreateSignature(const void *digest, size_t length, unsigned char **output, size_t *output_length)` — four register arguments. The software helper consumes 32 digest bytes and produces two 32-byte result components. The reviewed entry logs length without enforcing it. A future caller must validate exactly 32 bytes before invoking the software path and validate the resulting pointer and length before use. The signedness or typedef of the original length is not recoverable from these call sites alone.
+- `int AuthDeviceCopyCertificate(unsigned char **output, size_t *output_length)` — two register arguments. The software implementation preassigns length 607, then allocates; allocation failure can therefore leave a nonzero length with a null pointer. Initialize both out parameters before invocation and check both afterward.
+
+Ownership is confirmed by the library's normal callers: signer callback `0x6bb4` initializes output slots, calls the signing export at `0x6bc4`, passes the result onward, then calls the same runtime's `free` at `0x6bd8`. Certificate callback `0x6c04` follows the same pattern with calls at `0x6c14` and `0x6c28`. This does not justify passing allocated buffers across incompatible libc/architecture boundaries.
+
+The binary declares ARMv7/Cortex-A7, Thumb-2/NEON and hard-float EABI, and depends on its uClibc/C++ runtime. Any eventual device-side process needs that compatible runtime. The proposed ABI is not a native AArch64 Cruiser ABI.
+
+### Lifecycle and remaining blockers
+
+- `DestroyiAP2` calls internal auth finalization at `0x7368` and then dereferences the supplied context. It is **not** a standalone safe null-context auth cleanup function. No exported auth-only finalize function was found. The software finalizer at `0x650c` is a logging routine; the general iAP lifecycle also manages mutexes, transport and session resources.
+- A further independent review followed dispatcher `0x6620`: mode 2 branches through `0x662e` to `0x650c`, which only invokes the logger. No provider free, mode reset or signer-storage write was found there. The certificate/signature entry points accept no iAP context; their software paths allocate outputs per call and signing performs its own setup. Remaining direct destruction operations affect context/session resources. Thus context destruction is not evidenced to invalidate this software provider, although this does not prove every indirect logging callback's behavior. The defensible bridge conditions are matching library, normal selection observed in the current worker, serialized operations and selection changes, revocation on another selection, and keeping the stock process/library alive.
+- The software helper uses global scratch state. Serialize any future requests and never race a change of provider against an active signature operation. Memory allocation and success return are not evidence that the phone accepted the result.
+- No exported protocol-major query was found. Public curve constants at `0x13198` (field prime) and `0x13178` (subgroup order) match NIST P-256 and are referenced by the reviewed arithmetic. Output comprises two 32-byte big-endian components. This supports a P-256-compatible classification; it is not an independent verification of every signing operation. Advertising major 3 in a future LIVI adapter would be an inferred compatibility classification, not a measured stock register or an explicit stock advertisement.
+- Matching live library hashes, stock-selected mode/path, and the observed stock iAP2 phone acceptance are established above. Later trials confirm observer loading, the normal selector hook and received phone-authentication success with LIVI's explicit bridge endpoint. Broader ABI/failure-path coverage, contention and lifecycle beyond these bounded trials, audio, reconnection and sustained operation remain unverified.
+- The initial analysis performed no credential export, additional stock binary launch, mode forcing, duplicate `lylinkapp`, or authentication-service deployment. Subsequent synthetic and stock observation trials are recorded separately below.
+
+## Prototype validation on the same dongle
+
+The default observer build and two synthetic fixture binaries were temporarily copied into a unique directory under `/tmp`, after verifying that the live libc and loader matched the runtime used for local ARM emulation:
+
+| Runtime file          | SHA-256                                                            |
+| --------------------- | ------------------------------------------------------------------ |
+| `/lib/libc.so.0`      | `41954a9a9fd14d262eada61caf8de98749385e2dde1ed1fac488437a45efb69a` |
+| `/lib/ld-uClibc.so.0` | `39d3f7d7b34448c8c7026b6b3fe46218366700fc0c768c285796d6fcb2acd8b6` |
+
+All three transferred file hashes were checked before execution. The observer artifact had SHA-256 `f4ab562368039395609002f081c43eb433233dd0daa55cfcc6bfcb999e2bfd04`, built from interposer source SHA-256 `2eca799e42bfbb3738b9967043e22fae01593d8e1a4a1a3e50beac413244bc3d`.
+
+Both baseline and interposed synthetic runs exited zero after a fork and four worker threads. Both completed 96 mock signature calls and zero certificate calls; peak concurrent provider calls fell from 4 to 1 with interposition. Original selector return values `0`, `23`, and `-71` passed through unchanged. This used the synthetic provider, not the stock authentication library, and the default observer opened no listener.
+
+Stock supervisor/worker PIDs remained 986/1322 before and after the test. The three temporary binaries and their directory were removed and removal verified. No stock process, startup setting, firmware or partition was changed. This verifies the exercised loader, symbol, fork and mutex behavior on this device; it does not establish real stock-process interposition, provider lifecycle safety, or external CarPlay authentication.
+
+### Recovery launcher validation
+
+A separate launcher test build targeted only `/tmp/livi-ax520-lifecycle/mock-stock`, never the stock executable. The final reviewed launcher source had SHA-256 `fa273b418e479dfb442b530d5974ffb4f077281df9f7dcba8fed3b88e806c5d2`; its ARM test executable was `f902cdf2851a7a8cf81e0f325733645303204b0a45f427c6d3febb70e653c021`. The mock application linked to the synthetic provider and stock libc only.
+
+On the actual dongle kernel, both original-worker and trial-worker zombie-main-thread cases completed one normal mock restoration, with no live sibling thread remaining. A separate escaped-worker case retained its live sibling and correctly reported `rollback_blocked_existing_stock`, without starting a duplicate controller. The test runner then removed the explicitly owned mock processes and temporary files. Stock supervisor/worker PIDs remained 986/1322 throughout. These results validate those recovery cases on the target kernel, not recovery from every real-stock failure.
+
+The first real-stock observer attempt timed out during its initial read-only hash check. A subsequent SSH diagnostic identified a required Tailscale identity check before a session could open. No observer files were uploaded, no stock process was stopped, and no firmware operation was attempted in that attempt. The completed observation and metadata-only bridge trials below supersede that access blocker.
+
+### Final launcher and stock observation, 2026-11-13
+
+The final launcher source had SHA-256 `0ea117253662972439836d993b8d871195bffa897af38a4920a6066d7f38b205`. Before using it with the stock application, three ARM synthetic cases completed on the actual dongle:
+
+- The baseline trial observed the normal mock selector and restored one mock supervisor/worker pair.
+- The exit-race fixture returned `transition=0 uncertain=-1 waited=1 signal=-1 untouched=1`: exit between process-state and executable reads was accepted only after death was confirmed, while persistent unreadable identity remained bounded and never authorized a signal.
+- The interrupted-start fixture exercised the bridge-capable test launcher with the default observer shim. A termination request during its delayed startup handshake ended with `result restored`. No selection or trial-main event was required because interruption occurred before ordinary trial startup. This validates that synthetic recovery case, not real-provider operation.
+
+Across all three cases, the actual stock supervisor/worker remained 986/10370 with unchanged start times. Fresh hashes of the stock application, authentication library, libc and loader matched before and after; all owned temporary test processes, files and status directories were removed.
+
+The subsequent 20-second stock observation used production launcher SHA-256 `15c4374d9a253160b90a08175964c14eca1db13db836d11eafcc9e519540d81c` and default observer SHA-256 `f4ab562368039395609002f081c43eb433233dd0daa55cfcc6bfcb999e2bfd04`. All four stock/runtime hashes and both uploaded artifact hashes were checked before launch. The detached watchdog reported:
+
+```text
+mode observer
+stage armed
+stage original_stopped
+observer loaded
+observer selected
+stage trial_stopped
+result restored
+```
+
+Normal stock supervisor/worker 11567/11568 replaced the original pair. Two subsequent process reads agreed on their identities, both mapping checks reported no observer shim, and all four stock/runtime hashes remained unchanged. Temporary observer artifacts and the status directory were removed, with removal verified.
+
+This directly validates default-observer loading into the stock process, observation of its ordinary successful `ly_iap` selection, and one complete normal-restoration cycle under these conditions. The observer opened no broker listener and initiated no external certificate or signature requests. It does not establish bridge authentication, video, audio, touch, reconnection, or recovery from every possible failure. No firmware write or reboot was part of these trials.
+
+### Bounded bridge metadata trial, 2026-11-13
+
+A subsequent explicit device-bridge trial used a 300-second limit and these verified artifacts:
+
+| Artifact                           | SHA-256                                                            |
+| ---------------------------------- | ------------------------------------------------------------------ |
+| Bridge-capable production launcher | `23d492a69ada21de97491441c83ec49329fcb0f0957d76515bc5f32f275fcdc6` |
+| Opt-in bridge interposer           | `8e0800cb7eacad871813f126510941ebb7d45b69fab84245c3c130e728350d0e` |
+| ARM loopback relay                 | `872d946651dfbaa60b76f2ac1e45dc1fc781e50a565104a49df59a1e112bcfab` |
+
+The watchdog observed normal selection in the trial worker. Readiness checks tied the loopback listener to that worker and received protocol-major **3** from the metadata operation. The same one-byte metadata value was verified through Cruiser's loopback forward and the relay. This confirms that transport path and the bridge's advertised compatibility classification at that point; major 3 remains an inferred classification, not a measured stock register or phone acceptance.
+
+The trial ended with `result restored`. Normal stock supervisor/worker 11874/11875 passed repeated identity and no-shim mapping checks. The stock application, authentication library, libc and loader hashes matched their preflight values. Temporary artifacts and the private status directory were removed and cleanup was verified.
+
+This first bridge trial performed metadata checks only. It did not activate LIVI's host receiver or issue external certificate/signature requests. No host helper or service setting was changed in this trial. Its result alone does not establish phone acceptance or projection; the later phone-attached trial below adds separate evidence.
+
+### Phone-attached LIVI trial, 2026-11-13
+
+During a later bounded host trial, a real iPhone was attached while LIVI used the explicit loopback bridge endpoint. An allowlisted count from the active application log recorded one endpoint-available marker, three identification-accepted markers, three `wired: MFi auth succeeded` markers, three carkit-ready markers and two `CarPlayStartSession sent` markers. These are event counts in the sampled window, not counts of signing calls, distinct phones or successful reconnections.
+
+The source establishes why this is stronger than metadata readiness:
+
+1. [`mfi::select`](../native/crates/livi-helper/src/mfi.rs) returns the configured network provider for a nonempty endpoint and never invokes the local-provider fallback. [`embedded::serve`](../native/crates/livi-helper/src/embedded.rs) also prevents automatic dongle identity replacement when that endpoint is configured.
+2. [`run_auth`](../native/crates/livi-runtime/src/bringup.rs) returns success only after receiving message `0xAA05`; `0xAA04` is the failure path. It emits `BringupEvent::Authenticated` only after that success.
+3. [`livi_sock`](../native/crates/livi-runtime/src/livi_sock.rs) emits the counted `MFi auth succeeded` marker for that event. [`AuthenticationSucceeded`](../native/crates/iap2-csm/src/messages/authentication.rs) defines message `0xAA05`.
+
+Together with the active endpoint configuration, these observations support received phone acceptance through the configured bridge path, rather than a local fallback identity. No certificate, challenge or signature payload was logged or copied for this evidence. The counters do not establish how many individual provider signing operations occurred.
+
+The owner reported **“CarPlay is showing”**, then confirmed **“touch works”** during the trial. Audio could not be tested. The owner later saw LIVI's loading screen; the 90-second host coordinator had completed its planned rollback after 98.065 seconds and verified restoration of the original host helper/service. That return is consistent with the bounded trial ending, rather than proof of a spontaneous projection failure.
+
+The associated stock bridge subsequently completed its 300-second limit and reported `result restored`. Normal supervisor/worker 12462/12463 passed repeated identity checks with no shim mappings; the four stock/runtime hashes matched their preflight values. Temporary bridge artifacts and the private status directory were removed, with cleanup verified. Both sides of this bounded trial therefore returned to their original configurations; the result is not a persistent bridge deployment.
+
+| Acceptance item                                   | Evidence and limit                                                                      |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| iAP2 authentication through the explicit endpoint | Received authentication-success markers, with no fallback path in the configured helper |
+| CarPlay display                                   | Confirmed by the owner during the active trial                                          |
+| Touch input                                       | Confirmed by the owner during the active trial                                          |
+| Audio                                             | Not tested                                                                              |
+| Reconnection                                      | Not verified; repeated authentication markers are not a reconnection test               |
+| Sustained or permanent operation                  | Not verified; this was a timed trial with planned host restoration                      |
+
+The same sampled window also contained two usbmux failures, one USB retry-limit marker and one USB reset after no session. The aggregate evidence does not identify which USB peer produced each failure. These counters do not negate the owner's display/touch report, but they limit claims about transport stability. The stock adapter's Apple USB identity still does not establish compatibility with LIVI's full native wired receiver path.

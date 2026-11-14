@@ -1,0 +1,19 @@
+[Unit]
+Description=LIVI AX520 current-boot authentication connection
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/cruiser/LIVI/ax520-current-boot-service/service.py --receipt /home/cruiser/LIVI/ax520-current-boot-service/receipt.json
+WorkingDirectory=/home/cruiser/LIVI/ax520-current-boot-service
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=78
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+StandardOutput=null
+StandardError=journal
+
+# This is a current-boot service. Do not enable it at login/cold boot until a
+# separate verified dongle bootstrap supplies fresh matching device identities.
