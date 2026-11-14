@@ -88,11 +88,17 @@ async fn handle(
         },
         "deauth-ap" => {
             let count = match deps.deauth_dongle {
-                Some(deauth) => tokio::task::spawn_blocking(deauth)
-                    .await
-                    .ok()
-                    .flatten()
-                    .unwrap_or(0),
+                Some(deauth) => {
+                    let count = tokio::task::spawn_blocking(deauth).await.ok().flatten();
+                    if count.is_none() && deps.wifi_iface == livi_core_proto::ax520::INTERFACE {
+                        return reply(
+                            &mut stream,
+                            &err_json("access point deauthentication unavailable"),
+                        )
+                        .await;
+                    }
+                    count.unwrap_or(0)
+                }
                 None => deauth_ap(&deps.wifi_iface).await,
             };
             println!("[shared-sock] deauth-ap: kicked {count} client(s)");
@@ -371,5 +377,45 @@ async fn bluez_verb(bus: &Connection, verb: &str, arg: &str, adapter: &str) -> S
         "disconnect" => action(device_call(bus, adapter, arg, "Disconnect", None).await),
         "remove" => action(remove_device(bus, adapter, arg).await),
         other => err_json(&format!("unknown command: {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn deauth_reply(deauth: fn() -> Option<usize>) -> serde_json::Value {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let deps = Arc::new(SharedSockDeps {
+            adapter: String::new(),
+            wifi_iface: "ax520cp0".into(),
+            events: Broadcaster::default(),
+            set_playback_status: Box::new(|_| {}),
+            deauth_dongle: Some(deauth),
+            bluetooth: None,
+        });
+        let task = tokio::spawn(handle(server, None, deps));
+        client.write_all(b"deauth-ap\n").await.unwrap();
+        let line = read_line(&mut client).await.unwrap();
+        task.await.unwrap().unwrap();
+        serde_json::from_str(&line).unwrap()
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_external_ap_deauthentication_returns_an_error() {
+        let reply = deauth_reply(|| None).await;
+        assert_eq!(reply["ok"], false);
+        assert!(
+            reply["error"]
+                .as_str()
+                .is_some_and(|e| e.contains("unavailable"))
+        );
+    }
+
+    #[tokio::test]
+    async fn supported_external_ap_deauthentication_reports_its_actual_count() {
+        let reply = deauth_reply(|| Some(2)).await;
+        assert_eq!(reply["ok"], true);
+        assert_eq!(reply["count"], 2);
     }
 }

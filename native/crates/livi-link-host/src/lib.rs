@@ -8,6 +8,8 @@ extern crate nusb_android as nusb;
 pub mod ap;
 #[cfg(target_os = "linux")]
 pub mod bt;
+#[cfg(target_os = "linux")]
+pub mod external_net;
 pub mod link;
 #[cfg(any(target_os = "android", test))]
 mod net4;

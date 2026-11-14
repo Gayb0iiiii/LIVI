@@ -7,11 +7,17 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 #[cfg(target_os = "linux")]
+mod ax520_hci_trial;
+#[cfg(target_os = "linux")]
+mod ax520_net_trial;
+#[cfg(target_os = "linux")]
 mod linux_main;
 #[cfg(target_os = "macos")]
 mod mac_main;
 
 const SWITCHES: &[&str] = &[
+    "--ax520-net-trial",
+    "--ax520-hci-trial",
     "--wifi-ap-status",
     "--wifi-channels",
     "--install-wifi-ap",
@@ -114,6 +120,12 @@ fn main() -> ExitCode {
     }
     #[cfg(target_os = "linux")]
     {
+        if std::env::args().nth(1).as_deref() == Some("--ax520-net-trial") {
+            return ax520_net_trial::run(std::env::args().skip(2).collect());
+        }
+        if std::env::args().nth(1).as_deref() == Some("--ax520-hci-trial") {
+            return ax520_hci_trial::run(std::env::args().skip(2).collect());
+        }
         if std::env::args().any(|a| a == "--wifi-ap-status") {
             return linux_main::run_wifi_ap_status();
         }
@@ -176,6 +188,8 @@ mod tests {
     #[test]
     fn a_known_switch_passes() {
         assert_eq!(unknown_switch(args(&["--wifi-ap"])), None);
+        assert_eq!(unknown_switch(args(&["--ax520-net-trial", "30"])), None);
+        assert_eq!(unknown_switch(args(&["--ax520-hci-trial", "30"])), None);
         assert_eq!(
             unknown_switch(args(&["--install-wifi-ap", "/tmp/a", "/tmp/b"])),
             None

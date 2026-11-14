@@ -42,6 +42,9 @@ pub struct Bluetooth {
 }
 
 pub fn ap_iface(chosen: &str) -> String {
+    if chosen == livi_core_proto::ax520::CHOICE {
+        return livi_core_proto::ax520::INTERFACE.into();
+    }
     let iface = crate::or(chosen, "wlan0");
     if iface != livi_link_host::link::CHOICE {
         return iface;
@@ -66,31 +69,40 @@ async fn resolve_cp(cp: &CpConfig, dongle_ap: bool) -> CpConfig {
         .unwrap_or_else(|_| cp.clone())
 }
 
-async fn adapter(chosen: &str) -> String {
+async fn adapter(chosen: &str) -> std::io::Result<String> {
     let adapter = crate::or(chosen, "hci0");
-    if adapter != livi_link_host::link::CHOICE {
-        return adapter;
+    let stock = adapter == livi_core_proto::ax520::CHOICE;
+    if adapter != livi_link_host::link::CHOICE && !stock {
+        return Ok(adapter);
     }
     let (tx, mut rx) = mpsc::unbounded_channel();
     let ours = Arc::new(AtomicBool::new(false));
     let lost = ours.clone();
-    livi_link_host::bt::attach(
-        move |index| {
-            ours.store(true, Ordering::Relaxed);
-            if tx.send(index).is_err() {
-                eprintln!("[bt] the dongle's controller came back, starting over with it");
-                std::process::exit(1);
-            }
-        },
-        move || {
-            if lost.load(Ordering::Relaxed) {
-                eprintln!("[bt] the dongle's controller is gone, starting over");
-                std::process::exit(1);
-            }
-        },
-    );
+    let on_adapter = move |index| {
+        ours.store(true, Ordering::Relaxed);
+        if tx.send(index).is_err() {
+            eprintln!("[bt] the dongle's controller came back, starting over with it");
+            std::process::exit(1);
+        }
+    };
+    let on_lost = move || {
+        if lost.load(Ordering::Relaxed) {
+            eprintln!("[bt] the dongle's controller is gone, starting over");
+            std::process::exit(1);
+        }
+    };
+    if stock {
+        let endpoint = (
+            std::net::Ipv4Addr::LOCALHOST,
+            livi_core_proto::ax520::HCI_PORT,
+        )
+            .into();
+        livi_link_host::bt::attach_external(endpoint, on_adapter, on_lost)?;
+    } else {
+        livi_link_host::bt::attach(on_adapter, on_lost);
+    }
     match rx.recv().await {
-        Some(index) => format!("hci{index}"),
+        Some(index) => Ok(format!("hci{index}")),
         None => {
             eprintln!("[bt] the dongle's controller is out of reach, starting over");
             std::process::exit(1);
@@ -98,9 +110,34 @@ async fn adapter(chosen: &str) -> String {
     }
 }
 
+fn wireless_for(iface: &str, requested: bt::Wireless) -> bt::Wireless {
+    bt::Wireless {
+        android_auto: requested.android_auto && iface != livi_core_proto::ax520::INTERFACE,
+        ..requested
+    }
+}
+
+fn deauth_handler(dongle_ap: bool, stock_ap: bool) -> Option<fn() -> Option<usize>> {
+    if stock_ap {
+        Some(|| None)
+    } else {
+        dongle_ap.then_some(livi_link_host::ap::deauth)
+    }
+}
+
 pub async fn serve(b: Bluetooth, mut stop: watch::Receiver<bool>) -> Result<(), Box<dyn Error>> {
-    let wireless = b.wireless;
-    let adapter = adapter(&b.adapter).await;
+    if (b.cp.wifi_iface == livi_core_proto::ax520::INTERFACE
+        || b.adapter == livi_core_proto::ax520::CHOICE)
+        && !crate::ax520_stock::configured()
+    {
+        return Err("AX520 AP profile is unavailable".into());
+    }
+    let stock_ap = b.cp.wifi_iface == livi_core_proto::ax520::INTERFACE;
+    let wireless = wireless_for(&b.cp.wifi_iface, b.wireless);
+    if b.wireless.android_auto && !wireless.android_auto {
+        eprintln!("[helper] wireless Android Auto provisioning is unavailable with the stock AP");
+    }
+    let adapter = adapter(&b.adapter).await?;
     let _ = tokio::task::spawn_blocking(move || livi_runtime::bluetoothd::setup(wireless)).await;
     println!(
         "[helper] starting BlueZ profile on {adapter} (wireless CarPlay {}, wireless Android Auto {})",
@@ -205,9 +242,7 @@ pub async fn serve(b: Bluetooth, mut stop: watch::Receiver<bool>) -> Result<(), 
                 };
                 tokio::spawn(async move { h.set_status(status).await });
             }),
-            deauth_dongle: b
-                .dongle_ap
-                .then_some(livi_link_host::ap::deauth as fn() -> Option<usize>),
+            deauth_dongle: deauth_handler(b.dongle_ap, stock_ap),
             bluetooth: None,
         };
         let path = b.sockets.shared.clone();
@@ -291,4 +326,34 @@ fn format_mac(mac: &[u8; 6]) -> String {
         .map(|b| format!("{b:02X}"))
         .collect::<Vec<_>>()
         .join(":")
+}
+
+#[cfg(test)]
+mod stock_ap_tests {
+    #[test]
+    fn stock_ap_advertises_carplay_without_unsupported_android_auto_provisioning() {
+        let requested = livi_runtime::bt::Wireless {
+            carplay: true,
+            android_auto: true,
+        };
+        let stock = super::wireless_for("ax520cp0", requested);
+        assert!(stock.carplay);
+        assert!(!stock.android_auto);
+        assert_eq!(super::wireless_for("wlan0", requested), requested);
+        assert_eq!(super::wireless_for("usb0", requested), requested);
+    }
+
+    #[test]
+    fn stock_ap_deauthentication_cannot_fall_back_to_hostapd() {
+        let unavailable = super::deauth_handler(false, true).expect("external handler");
+        assert_eq!(unavailable(), None);
+        assert!(super::deauth_handler(false, false).is_none());
+        assert!(super::deauth_handler(true, false).is_some());
+    }
+
+    #[test]
+    fn stock_ap_uses_the_existing_tap_instead_of_a_radio_name() {
+        assert_eq!(super::ap_iface("ax520-stock"), "ax520cp0");
+        assert_eq!(super::ap_iface("wlan7"), "wlan7");
+    }
 }

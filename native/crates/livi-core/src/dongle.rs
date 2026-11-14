@@ -109,6 +109,11 @@ fn mbps(bytes: f64, over: Duration) -> f64 {
 }
 
 fn host_counters(iface: &str) -> Option<Status> {
+    let iface = if iface == livi_core_proto::ax520::CHOICE {
+        livi_core_proto::ax520::INTERFACE
+    } else {
+        iface
+    };
     let bytes = |dir: &str| {
         std::fs::read_to_string(format!("/sys/class/net/{iface}/statistics/{dir}_bytes"))
             .ok()
@@ -122,6 +127,9 @@ fn host_counters(iface: &str) -> Option<Status> {
 
 fn host_rates(iface: &str) -> Status {
     let mut status = Status::new();
+    if iface == livi_core_proto::ax520::CHOICE {
+        return status;
+    }
     if let Some((down, up)) = livi_wifi::stations(iface).rates {
         status.insert("downrate".into(), down.to_string());
         status.insert("uprate".into(), up.to_string());

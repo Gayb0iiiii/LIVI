@@ -4,8 +4,9 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::fs::OpenOptionsExt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -13,6 +14,9 @@ use std::time::Duration;
 use livi_net::tunnel::{self, PACKET_MAX};
 
 use crate::link;
+
+mod external;
+pub mod trial;
 
 const VHCI: &str = "/dev/vhci";
 const RFKILL: &str = "/sys/class/rfkill";
@@ -39,6 +43,42 @@ pub fn attach(
     });
 }
 
+/// Attach an existing stock controller through its local ADB TCP forward.
+/// Pairing uses the host's own fresh bond store; controller-stored keys and
+/// vendor command interfaces are deliberately unavailable through this proxy.
+///
+/// This worker is process-scoped, matching `attach`. The Linux helper calls it
+/// once from `bluez::serve`; settings changes terminate and wait for that helper
+/// process before starting another. Do not repeatedly call this from an embedded
+/// runtime that survives configuration changes. Peer EOF closes VHCI before the
+/// loss callback; process exit also closes all owned controller descriptors.
+pub fn attach_external(
+    endpoint: SocketAddr,
+    on_adapter: impl Fn(u16) + Send + Sync + 'static,
+    on_lost: impl Fn() + Send + 'static,
+) -> std::io::Result<()> {
+    external::endpoint(endpoint)?;
+    std::thread::Builder::new()
+        .name("stock-hci".into())
+        .spawn(move || {
+            loop {
+                match tunnel_external(endpoint, &on_adapter) {
+                    Ok(true) => on_lost(),
+                    Ok(false) | Err(TunnelError::NoDongle(_)) => {}
+                    Err(error) => eprintln!("[bt] external controller: {error}"),
+                }
+                std::thread::sleep(RETRY);
+            }
+        })?;
+    Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Link,
+    External,
+}
+
 #[derive(Debug)]
 pub enum TunnelError {
     NoDongle(std::io::Error),
@@ -57,6 +97,24 @@ impl std::fmt::Display for TunnelError {
 pub fn tunnel(on_adapter: &(impl Fn(u16) + Sync)) -> Result<bool, TunnelError> {
     let stream =
         link::connect(livi_net::port::HCI, CONNECT_TIMEOUT).map_err(TunnelError::NoDongle)?;
+    tunnel_stream(stream, Mode::Link, on_adapter)
+}
+
+pub fn tunnel_external(
+    endpoint: SocketAddr,
+    on_adapter: &(impl Fn(u16) + Sync),
+) -> Result<bool, TunnelError> {
+    external::endpoint(endpoint).map_err(|e| TunnelError::Failed(e.to_string()))?;
+    let stream =
+        TcpStream::connect_timeout(&endpoint, CONNECT_TIMEOUT).map_err(TunnelError::NoDongle)?;
+    tunnel_stream(stream, Mode::External, on_adapter)
+}
+
+fn tunnel_stream(
+    stream: TcpStream,
+    mode: Mode,
+    on_adapter: &(impl Fn(u16) + Sync),
+) -> Result<bool, TunnelError> {
     let failed = TunnelError::Failed;
     stream
         .set_nodelay(true)
@@ -67,43 +125,81 @@ pub fn tunnel(on_adapter: &(impl Fn(u16) + Sync)) -> Result<bool, TunnelError> {
     let mut dev = OpenOptions::new()
         .read(true)
         .write(true)
+        .custom_flags(if mode == Mode::External {
+            libc::O_NONBLOCK
+        } else {
+            0
+        })
         .open(VHCI)
         .map_err(|e| failed(format!("{VHCI}: {e}")))?;
     dev.write_all(&CREATE_PRIMARY)
         .map_err(|e| failed(format!("{VHCI}: no adapter: {e}")))?;
     let made = AtomicBool::new(false);
-    pump(dev, stream, &|index| {
+    let named = |index| {
         made.store(true, Ordering::Relaxed);
         on_adapter(index);
-    });
+    };
+    match mode {
+        Mode::Link => pump(dev, stream, &named),
+        Mode::External => pump_external(dev, stream, &named),
+    }
     println!("[bt] tunnel closed");
     Ok(made.load(Ordering::Relaxed))
 }
 
+fn pump_external(dev: File, stream: TcpStream, named: &(impl Fn(u16) + Sync)) {
+    pump_mode(dev, stream, named, Mode::External);
+}
+
 fn pump(dev: File, stream: TcpStream, named: &(impl Fn(u16) + Sync)) {
+    pump_mode(dev, stream, named, Mode::Link);
+}
+
+fn pump_mode(dev: File, stream: TcpStream, named: &(impl Fn(u16) + Sync), mode: Mode) {
     let (Ok(out), Ok(reader)) = (stream.try_clone(), dev.try_clone()) else {
         eprintln!("[bt] cannot split the tunnel");
         return;
     };
     let stop = AtomicBool::new(false);
+    let session = external::Session::default();
     let out = Mutex::new(out);
     std::thread::scope(|threads| {
-        threads.spawn(|| out_bound(reader, &out, &stop, named));
-        in_bound(dev, &stream, &out);
+        threads.spawn(|| {
+            out_bound(reader, &out, &stop, named, mode, &session);
+            // A rejected command or a device error must also release the inbound
+            // reader. TCP keepalive alone does not detect a healthy idle peer.
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        });
+        in_bound(dev, &stream, &out, mode, &session);
         stop.store(true, Ordering::Relaxed);
         let _ = stream.shutdown(std::net::Shutdown::Both);
     });
 }
 
-fn out_bound(dev: File, out: &Mutex<TcpStream>, stop: &AtomicBool, named: &impl Fn(u16)) {
+fn out_bound(
+    mut dev: impl Read + AsRawFd,
+    out: &Mutex<TcpStream>,
+    stop: &AtomicBool,
+    named: &impl Fn(u16),
+    mode: Mode,
+    session: &external::Session,
+) {
     let mut buf = [0u8; PACKET_MAX];
     while !stop.load(Ordering::Relaxed) {
         if !readable(dev.as_raw_fd(), POLL_MS) {
             continue;
         }
-        let n = match (&dev).read(&mut buf) {
+        let n = match dev.read(&mut buf) {
             Ok(0) => return,
             Ok(n) => n,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                continue;
+            }
             Err(e) => {
                 eprintln!("[bt] read {VHCI}: {e}");
                 return;
@@ -117,6 +213,17 @@ fn out_bound(dev: File, out: &Mutex<TcpStream>, stop: &AtomicBool, named: &impl 
                 named(index);
             }
             continue;
+        }
+        if mode == Mode::External && !session.outgoing(&buf[..n]) {
+            if buf[0] == COMMAND && n >= 3 {
+                eprintln!(
+                    "[bt] external controller rejected opcode={:04x}",
+                    u16::from_le_bytes([buf[1], buf[2]])
+                );
+            } else {
+                eprintln!("[bt] external controller rejected outgoing type={}", buf[0]);
+            }
+            return;
         }
         if let Err(e) = send(out, &buf[..n]) {
             eprintln!("[bt] send: {e}");
@@ -145,7 +252,13 @@ fn unblock(index: u16) {
     }
 }
 
-fn in_bound(mut dev: File, stream: &TcpStream, out: &Mutex<TcpStream>) {
+fn in_bound(
+    mut dev: File,
+    stream: &TcpStream,
+    out: &Mutex<TcpStream>,
+    mode: Mode,
+    session: &external::Session,
+) {
     let mut input = stream;
     let mut buf = [0u8; PACKET_MAX];
     let mut own_orders = 0u32;
@@ -159,6 +272,10 @@ fn in_bound(mut dev: File, stream: &TcpStream, out: &Mutex<TcpStream>) {
                 return;
             }
         };
+        if mode == Mode::External && !session.incoming(&mut buf[..n]) {
+            eprintln!("[bt] external controller rejected unsupported incoming packet");
+            return;
+        }
         if own_orders > 0 && answers(&buf[..n], WRITE_VOICE_SETTING) {
             own_orders -= 1;
             continue;
@@ -231,6 +348,64 @@ mod tests {
         pkt.push(0);
         pkt.extend_from_slice(params);
         pkt
+    }
+
+    #[test]
+    fn readiness_races_do_not_end_a_nonblocking_hci_pump() {
+        use std::fs::File;
+        use std::io::{self, Read};
+        use std::net::{TcpListener, TcpStream};
+        use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+        use std::os::unix::net::UnixDatagram;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::{Arc, Mutex};
+        use std::time::Duration;
+        struct TransientRead {
+            file: File,
+            errors: usize,
+        }
+        impl AsRawFd for TransientRead {
+            fn as_raw_fd(&self) -> RawFd {
+                self.file.as_raw_fd()
+            }
+        }
+        impl Read for TransientRead {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                self.errors += 1;
+                match self.errors {
+                    1 => Err(io::ErrorKind::WouldBlock.into()),
+                    2 => Err(io::ErrorKind::Interrupted.into()),
+                    _ => self.file.read(buf),
+                }
+            }
+        }
+        let (device, kernel) = UnixDatagram::pair().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let mut peer = listener.accept().unwrap().0;
+        peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stop = stopped.clone();
+        let pump = std::thread::spawn(move || {
+            super::out_bound(
+                TransientRead {
+                    file: File::from(OwnedFd::from(device)),
+                    errors: 0,
+                },
+                &Mutex::new(stream),
+                &stop,
+                &|_| {},
+                super::Mode::Link,
+                &super::external::Session::default(),
+            )
+        });
+        kernel.send(&[1, 1, 16, 0]).unwrap();
+        let mut frame = [0; 6];
+        let received = peer.read_exact(&mut frame);
+        stopped.store(true, Ordering::Relaxed);
+        pump.join().unwrap();
+        received.unwrap();
+        assert_eq!(frame, [0, 4, 1, 1, 16, 0]);
     }
 
     #[test]

@@ -313,6 +313,18 @@ fn wifi_config(cp: &CpConfig, live: Option<&OnAir>) -> AccessoryWiFiConfiguratio
     }
 }
 
+fn ap_ready(cp: &CpConfig, live: Option<&OnAir>) -> bool {
+    cp.wifi_iface != livi_core_proto::ax520::INTERFACE
+        || live.is_some_and(|ap| !cp.ssid.is_empty() && ap.ssid == cp.ssid)
+}
+
+fn wifi_config_if_ready(
+    cp: &CpConfig,
+    live: Option<&OnAir>,
+) -> Option<AccessoryWiFiConfigurationInformation> {
+    ap_ready(cp, live).then(|| wifi_config(cp, live))
+}
+
 fn on_cable(cp: &CpConfig, frame: &[u8]) -> Option<String> {
     let ask = cp.on_cable.as_ref()?;
     let offer = CarPlayAvailability::decode(frame).ok()?;
@@ -348,6 +360,9 @@ fn carplay_start_session(
             asset: theme_asset(cp),
             supports_mutual_authentication: mutual,
         });
+    }
+    if !ap_ready(cp, live.as_ref()) {
+        return None;
     }
     let fe80 = net::wlan_link_local(&cp.wifi_iface)?;
     let (ssid, channel, security) = told(cp, live.as_ref());
@@ -424,6 +439,10 @@ async fn wait_for_ap(cp: &CpConfig) -> Option<OnAir> {
             }
             return live;
         }
+    }
+    if !ap_ready(cp, live.as_ref()) {
+        println!("[cp] stock access point stayed unavailable");
+        return None;
     }
     println!("[cp] {what} stayed down, answering anyway");
     live
@@ -573,11 +592,11 @@ pub async fn run_accessory<C: ControlChannel, A: AsyncAuth>(
             }
             0x5702 => {
                 let live = on_air(&cp).await;
-                if ch
-                    .send(wifi_config(&cp, live.as_ref()).encode())
-                    .await
-                    .is_err()
-                {
+                let Some(config) = wifi_config_if_ready(&cp, live.as_ref()) else {
+                    println!("[cp] stock access point unavailable; Wi-Fi configuration not sent");
+                    continue;
+                };
+                if ch.send(config.encode()).await.is_err() {
                     break;
                 }
                 let _ = events.send(BringupEvent::WifiConfigSent).await;
@@ -628,8 +647,10 @@ async fn send_start<C: ControlChannel>(
     events: &mpsc::Sender<BringupEvent>,
     offer: Option<&[u8]>,
 ) -> bool {
+    let ap_unavailable = cp.transport != Transport::Wired && !ap_ready(cp, live.as_ref());
     let Some(start) = carplay_start_session(cp, live, mutual) else {
         let why = match (&cp.transport, cp.av_iface.as_deref()) {
+            _ if ap_unavailable => "stock access point unavailable".into(),
             (Transport::Wired, None) => {
                 "the phone's USB network interface was not found".to_string()
             }
@@ -759,6 +780,28 @@ mod tests {
                 });
             assert_eq!(named, Some(Some("44C9FA31EC".into())));
         }
+    }
+
+    #[test]
+    fn stock_ap_never_falls_back_to_saved_wifi_details_when_not_ready() {
+        let cp = CpConfig {
+            wifi_iface: "ax520cp0".into(),
+            ..dongle_ap(|| None)
+        };
+        assert!(wifi_config_if_ready(&cp, None).is_none());
+        assert!(wifi_config_if_ready(&cp, Some(&ap("another AP", 36))).is_none());
+        let ready = wifi_config_if_ready(&cp, Some(&ap("LIVI", 36))).unwrap();
+        assert_eq!(ready.ssid.as_deref(), Some("LIVI"));
+        assert!(wifi_config_if_ready(&dongle_ap(|| None), None).is_some());
+        let wired = CpConfig {
+            transport: Transport::Wired,
+            av_address: Some("fe80::1234".into()),
+            ..cp
+        };
+        assert!(
+            carplay_start_session(&wired, None, None).is_some(),
+            "wired projection does not require this AP"
+        );
     }
 
     #[test]

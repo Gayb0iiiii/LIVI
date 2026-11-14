@@ -29,6 +29,7 @@ const ON_AIR_POLL: Duration = Duration::from_millis(250);
 
 pub(crate) fn wanted(cfg: &Config) -> bool {
     cfg.wifi_interface != CHOICE
+        && cfg.wifi_interface != livi_core_proto::ax520::CHOICE
         && (cfg.wifi_dedicated_interface
             || cfg.wireless_cp_enabled
             || cfg.wireless_aa_enabled
@@ -220,6 +221,9 @@ fn parse_status(out: &str) -> Option<Running> {
 }
 
 async fn settle(p: &Privileged, core: &Core, started: &Config) -> Config {
+    if started.wifi_interface == livi_core_proto::ax520::CHOICE {
+        return started.clone();
+    }
     let mut ran = started.clone();
     for _ in 0..SETTLE_TRIES {
         let out = Command::new(&p.helper)
@@ -359,6 +363,12 @@ mod tests {
         assert!(wanted(&cfg));
         cfg.wifi_interface = CHOICE.into();
         assert!(!wanted(&cfg));
+        cfg.wifi_interface = "ax520-stock".into();
+        cfg.wifi_dedicated_interface = true;
+        assert!(
+            !wanted(&cfg),
+            "the existing stock AP must not be reconfigured"
+        );
         let before = ap_settings(&cfg);
         cfg.wifi_channel += 1;
         assert_ne!(ap_settings(&cfg), before);
